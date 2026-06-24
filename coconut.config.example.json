@@ -9,6 +9,10 @@
   "temperature": 0.3,
   "maxIterations": 15,
 
+  "contextWindow": 64000,
+  "compressionThreshold": 0.7,
+  "keepRecentTurns": 4,
+
   "sandbox": {
     "kind": "local",
     "workspace": null,

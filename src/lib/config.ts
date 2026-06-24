@@ -21,6 +21,9 @@ export const ConfigSchema = z
     maxTokens: z.number().int().positive().optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxIterations: z.number().int().positive().optional(),
+    contextWindow: z.number().int().positive().optional(),
+    compressionThreshold: z.number().min(0.1).max(0.95).optional(),
+    keepRecentTurns: z.number().int().min(1).max(50).optional(),
     sandbox: SandboxSchema.optional(),
   })
   .strict();
@@ -35,15 +38,17 @@ export interface ResolvedConfig {
   maxTokens: number;
   temperature: number;
   maxIterations: number;
+  contextWindow: number;
+  compressionThreshold: number;
+  keepRecentTurns: number;
   sandbox: {
     kind: "local" | "docker";
     workspace: string;
     image: string;
     network: "bridge" | "none";
   };
-  // Where each value came from — for /config display.
   source: {
-    paths: string[]; // config files that were loaded (in order)
+    paths: string[];
   };
 }
 
@@ -55,6 +60,9 @@ const DEFAULTS: Omit<ResolvedConfig, "source"> = {
   maxTokens: 4096,
   temperature: 0.3,
   maxIterations: 15,
+  contextWindow: 64_000,
+  compressionThreshold: 0.7,
+  keepRecentTurns: 4,
   sandbox: {
     kind: "local",
     workspace: process.cwd(),
@@ -127,6 +135,26 @@ function envOverrides(): ConfigFile {
     if (!Number.isFinite(n) || n < 0 || n > 2)
       throw new Error("COCONUT_TEMPERATURE must be between 0 and 2");
     out.temperature = n;
+  }
+  if (process.env.COCONUT_CONTEXT_WINDOW) {
+    const n = Number(process.env.COCONUT_CONTEXT_WINDOW);
+    if (!Number.isFinite(n) || n <= 0)
+      throw new Error("COCONUT_CONTEXT_WINDOW must be a positive number");
+    out.contextWindow = n;
+  }
+  if (process.env.COCONUT_COMPRESSION_THRESHOLD) {
+    const n = Number(process.env.COCONUT_COMPRESSION_THRESHOLD);
+    if (!Number.isFinite(n) || n < 0.1 || n > 0.95)
+      throw new Error(
+        "COCONUT_COMPRESSION_THRESHOLD must be between 0.1 and 0.95",
+      );
+    out.compressionThreshold = n;
+  }
+  if (process.env.COCONUT_KEEP_RECENT_TURNS) {
+    const n = Number(process.env.COCONUT_KEEP_RECENT_TURNS);
+    if (!Number.isInteger(n) || n < 1 || n > 50)
+      throw new Error("COCONUT_KEEP_RECENT_TURNS must be an integer 1..50");
+    out.keepRecentTurns = n;
   }
 
   const sb: NonNullable<ConfigFile["sandbox"]> = {};
@@ -202,6 +230,10 @@ export async function loadConfig(opts?: {
     maxTokens: merged.maxTokens ?? DEFAULTS.maxTokens,
     temperature: merged.temperature ?? DEFAULTS.temperature,
     maxIterations: merged.maxIterations ?? DEFAULTS.maxIterations,
+    contextWindow: merged.contextWindow ?? DEFAULTS.contextWindow,
+    compressionThreshold:
+      merged.compressionThreshold ?? DEFAULTS.compressionThreshold,
+    keepRecentTurns: merged.keepRecentTurns ?? DEFAULTS.keepRecentTurns,
     sandbox: {
       kind: sb.kind ?? DEFAULTS.sandbox.kind,
       workspace: path.resolve(sb.workspace ?? cwd),
@@ -226,6 +258,9 @@ export function describeConfig(cfg: ResolvedConfig): string {
     `maxTokens:     ${cfg.maxTokens}`,
     `temperature:   ${cfg.temperature}`,
     `maxIterations: ${cfg.maxIterations}`,
+    `contextWindow:        ${cfg.contextWindow}`,
+    `compressionThreshold: ${cfg.compressionThreshold}`,
+    `keepRecentTurns:      ${cfg.keepRecentTurns}`,
     `sandbox.kind:  ${cfg.sandbox.kind}`,
     `sandbox.workspace: ${cfg.sandbox.workspace}`,
   ];
@@ -257,6 +292,9 @@ export const EXAMPLE_CONFIG: ConfigFile = {
   maxTokens: 4096,
   temperature: 0.3,
   maxIterations: 15,
+  contextWindow: 64_000,
+  compressionThreshold: 0.7,
+  keepRecentTurns: 4,
   sandbox: {
     kind: "local",
     workspace: null,

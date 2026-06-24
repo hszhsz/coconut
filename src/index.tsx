@@ -78,6 +78,9 @@ async function main() {
       maxTokens={cfg!.maxTokens}
       temperature={cfg!.temperature}
       maxIterations={cfg!.maxIterations}
+      contextWindow={cfg!.contextWindow}
+      compressionThreshold={cfg!.compressionThreshold}
+      keepRecentTurns={cfg!.keepRecentTurns}
       configDescription={describeConfig(cfg!)}
     />,
   );

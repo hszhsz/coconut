@@ -16,6 +16,9 @@ interface Props {
   maxTokens: number;
   temperature: number;
   maxIterations: number;
+  contextWindow: number;
+  compressionThreshold: number;
+  keepRecentTurns: number;
   configDescription: string;
 }
 
@@ -31,6 +34,9 @@ export default function App({
   maxTokens,
   temperature,
   maxIterations,
+  contextWindow,
+  compressionThreshold,
+  keepRecentTurns,
   configDescription,
 }: Props) {
   const { exit } = useApp();
@@ -38,6 +44,10 @@ export default function App({
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tokens, setTokens] = useState<{ used: number; window: number }>({
+    used: 0,
+    window: contextWindow,
+  });
   const [agent] = useState(
     () =>
       new Agent({
@@ -50,6 +60,9 @@ export default function App({
         maxTokens,
         temperature,
         maxIterations,
+        contextWindow,
+        compressionThreshold,
+        keepRecentTurns,
       }),
   );
 
@@ -84,6 +97,7 @@ export default function App({
       if (trimmed === "/clear") {
         agent.reset();
         setMessages([]);
+        setTokens(agent.tokenStats());
         setInput("");
         return;
       }
@@ -95,7 +109,7 @@ export default function App({
         append({
           role: "info",
           content:
-            "Commands: /config (show resolved config), /sandbox (show sandbox info), /clear (reset chat), /exit (quit), /help. Otherwise, just type your request.",
+            "Commands: /config, /sandbox, /tokens (show usage), /compact (force-compress now), /clear (reset chat), /exit, /help. Otherwise, just type your request.",
         });
         setInput("");
         return;
@@ -111,6 +125,35 @@ export default function App({
       if (trimmed === "/config") {
         append({ role: "info", content: configDescription });
         setInput("");
+        return;
+      }
+      if (trimmed === "/tokens") {
+        const s = agent.tokenStats();
+        const pct = (s.ratio * 100).toFixed(1);
+        append({
+          role: "info",
+          content: `Tokens: ${s.used.toLocaleString()} / ${s.window.toLocaleString()} (${pct}%)\nAuto-compact triggers at ${(compressionThreshold * 100).toFixed(0)}%`,
+        });
+        setInput("");
+        return;
+      }
+      if (trimmed === "/compact") {
+        setInput("");
+        setBusy(true);
+        try {
+          const r = await agent.maybeCompact("force", (m) =>
+            append({ role: "info", content: m }),
+          );
+          append({
+            role: "info",
+            content: `Compacted: ${r.before.toLocaleString()} → ${r.after.toLocaleString()} tokens (-${r.savedTokens.toLocaleString()})`,
+          });
+          setTokens(agent.tokenStats());
+        } catch (e: any) {
+          append({ role: "error", content: `Compaction failed: ${e?.message ?? e}` });
+        } finally {
+          setBusy(false);
+        }
         return;
       }
 
@@ -146,19 +189,35 @@ export default function App({
             isError,
           });
         },
+        onInfo: (msg) => {
+          flushText();
+          append({ role: "info", content: msg });
+        },
         onDone: () => {
           flushText();
+          setTokens(agent.tokenStats());
           setBusy(false);
         },
         onError: (err) => {
           flushText();
           append({ role: "error", content: err.message });
+          setTokens(agent.tokenStats());
           setBusy(false);
         },
       });
     },
-    [agent, busy, append, exit, sandbox, configDescription],
+    [agent, busy, append, exit, sandbox, configDescription, compressionThreshold],
   );
+
+  // Color the token meter by usage band.
+  const ratio = tokens.window > 0 ? tokens.used / tokens.window : 0;
+  const meterColor =
+    ratio >= compressionThreshold
+      ? "red"
+      : ratio >= compressionThreshold * 0.85
+        ? "yellow"
+        : "green";
+  const meterLabel = `${(tokens.used / 1000).toFixed(1)}K / ${(tokens.window / 1000).toFixed(0)}K (${(ratio * 100).toFixed(0)}%)`;
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -172,9 +231,13 @@ export default function App({
         <Text color="magenta" bold>
           🥥 Coconut
         </Text>
-        <Text dimColor>
-          model: {model} · sandbox: {sandbox.label} · /help for commands
-        </Text>
+        <Box>
+          <Text dimColor>
+            model: {model} · sandbox: {sandbox.label} · tokens:{" "}
+          </Text>
+          <Text color={meterColor}>{meterLabel}</Text>
+          <Text dimColor> · /help for commands</Text>
+        </Box>
       </Box>
 
       <Box flexDirection="column">

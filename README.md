@@ -11,6 +11,7 @@ Built with TypeScript, Bun, [Ink](https://github.com/vadimdemedes/ink), and any 
 - 🔄 Multi-turn agentic loop — the model can call tools repeatedly until done
 - 🧪 Sandboxing — run all tool operations in a Docker container or workspace-scoped local mode
 - 📝 Config file — persist your model, sandbox, temperature, and persona in `~/.config/coconut/config.json` or `.coconut.json`
+- 🗜️ Context compression — automatic two-stage pipeline (tool-result clearing + LLM summarization) when conversations approach the context window, with a live token meter in the header
 - 🔌 OpenAI-compatible — works with DeepSeek, Qwen, Moonshot, OpenAI, vLLM, Ollama, etc.
 - ⚡ Bun-powered, single-file build
 
@@ -93,6 +94,9 @@ Env vars override anything from config files:
 | `COCONUT_SYSTEM`      | (unset)                          | System-prompt addendum                   |
 | `COCONUT_MAX_TOKENS`  | `4096`                           | Max output tokens per turn               |
 | `COCONUT_TEMPERATURE` | `0.3`                            | Sampling temperature                     |
+| `COCONUT_CONTEXT_WINDOW`         | `64000` | Tokens before compression kicks in       |
+| `COCONUT_COMPRESSION_THRESHOLD`  | `0.7`   | Trigger at this fraction of the window   |
+| `COCONUT_KEEP_RECENT_TURNS`      | `4`     | Number of recent user turns kept verbatim |
 | `COCONUT_SANDBOX`         | `local`                          | Sandbox kind: `local` or `docker`    |
 | `COCONUT_WORKSPACE`       | current working directory        | Workspace root the agent operates in |
 | `COCONUT_SANDBOX_IMAGE`   | `node:22-slim`                   | Docker image (when sandbox=`docker`) |
@@ -126,9 +130,32 @@ export COCONUT_MODEL=qwen2.5-coder
 | `/help`    | Show available commands                 |
 | `/config`  | Show resolved config (paths + values, key redacted) |
 | `/sandbox` | Show sandbox kind + workspace           |
+| `/tokens`  | Show current token usage and compaction threshold |
+| `/compact` | Force-compress conversation history right now |
 | `/clear`   | Reset conversation history              |
 | `/exit`    | Quit                                    |
 | `Ctrl+C`   | Quit                                    |
+
+## Context compression
+
+Coding agents burn through context fast — tool outputs, file contents, long stack traces. Coconut runs a layered compression pipeline at the top of every turn, the same pattern Claude Code and Cline use:
+
+1. **Token estimation** — every message in history is measured (mixed ASCII/CJK heuristic). The TUI header shows `tokens: 12.3K / 64K (19%)`, color-coded green → yellow → red as you approach the threshold.
+2. **Cheap stage** (no LLM call) — when usage crosses `compressionThreshold`, bulky `tool_result` payloads from older turns are replaced with `[older tool result cleared — was N chars]` placeholders. `tool_call_id` linkage stays intact so the conversation remains structurally valid.
+3. **Expensive stage** (one LLM call) — if usage is *still* over threshold, history older than the last `keepRecentTurns` user turns is summarized into a single anchor message (preserving goals, files referenced, decisions made, current state, user preferences). The summary replaces the old turns; recent turns stay verbatim.
+4. **Manual override** — `/compact` runs the full pipeline immediately regardless of threshold.
+
+Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the last 4 user turns verbatim. Tune them in your config:
+
+```jsonc
+{
+  "contextWindow": 64000,            // adjust to your model's real window
+  "compressionThreshold": 0.7,       // 0.1–0.95
+  "keepRecentTurns": 4               // 1–50
+}
+```
+
+> The token count is a heuristic estimator (~4 chars/token for non-CJK, ~1 char/token for CJK), within ~15% of actual provider counts. It drives compression decisions but isn't billed-token-accurate.
 
 ## Sandbox
 
@@ -163,10 +190,11 @@ Requirements for `docker` mode: Docker Desktop, Colima, or Lima reachable as `do
 src/
 ├── index.tsx           # Entry point — loads config, inits sandbox, renders App
 ├── components/
-│   ├── App.tsx         # Main TUI: input box + message list
+│   ├── App.tsx         # Main TUI: input box + message list + token meter
 │   └── Message.tsx     # Renders one message (user/assistant/tool/info/error)
 ├── lib/
 │   ├── agent.ts        # OpenAI-compatible chat completions + tool loop
+│   ├── compaction.ts   # Token estimator + tool-result clearing + LLM summary
 │   ├── config.ts       # Layered config loader (defaults → file → env)
 │   ├── sandbox.ts      # Sandbox abstraction: LocalSandbox + DockerSandbox
 │   └── types.ts        # Shared types
