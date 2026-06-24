@@ -1,4 +1,5 @@
 import type { ToolDefinition } from "./types.js";
+import type { Sandbox } from "./sandbox.js";
 
 export type Role = "system" | "user" | "assistant" | "tool";
 
@@ -52,21 +53,25 @@ export interface AgentConfig {
   baseURL: string;
   model: string;
   tools: ToolDefinition[];
+  sandbox: Sandbox;
 }
 
-const SYSTEM_PROMPT = `You are Coconut, a concise coding agent running in the user's terminal.
+const SYSTEM_PROMPT_TEMPLATE = (workspace: string, sandboxLabel: string) =>
+  `You are Coconut, a concise coding agent running in the user's terminal.
 
-You have access to tools for reading, writing, editing files, listing directories, and running shell commands. The working directory is the user's current project.
+You have access to tools for reading, writing, editing files, listing directories, and running shell commands. All file and shell operations execute inside a sandboxed workspace — you cannot reach the host outside it.
+
+Sandbox: ${sandboxLabel}
+Workspace root: ${workspace}
 
 Guidelines:
 - Be direct. Skip preambles like "I'll help you with...".
 - Use tools to gather context before answering — read files, list directories, run commands.
 - For code changes, make the edit then briefly state what you did.
 - Prefer edit_file for targeted changes; write_file for new files.
+- Use workspace-relative paths in tool calls (e.g. "src/index.ts"), not absolute host paths.
 - When the user asks a question, answer it; only modify files when asked.
-- Keep responses short. Markdown is okay but no excessive formatting.
-
-Current working directory: ${process.cwd()}`;
+- Keep responses short. Markdown is okay but no excessive formatting.`;
 
 export class Agent {
   private apiKey: string;
@@ -74,6 +79,8 @@ export class Agent {
   private model: string;
   private tools: ToolDefinition[];
   private toolMap: Map<string, ToolDefinition>;
+  private sandbox: Sandbox;
+  private systemPrompt: string;
   private history: ChatMessage[] = [];
 
   constructor(config: AgentConfig) {
@@ -82,6 +89,11 @@ export class Agent {
     this.model = config.model;
     this.tools = config.tools;
     this.toolMap = new Map(this.tools.map((t) => [t.name, t]));
+    this.sandbox = config.sandbox;
+    this.systemPrompt = SYSTEM_PROMPT_TEMPLATE(
+      config.sandbox.workspace,
+      config.sandbox.label,
+    );
   }
 
   reset() {
@@ -96,7 +108,7 @@ export class Agent {
     const body = {
       model: this.model,
       messages: [
-        { role: "system" as const, content: SYSTEM_PROMPT },
+        { role: "system" as const, content: this.systemPrompt },
         ...messages,
       ],
       tools: this.tools.map((t) => ({
@@ -195,7 +207,7 @@ export class Agent {
           }
 
           try {
-            const result = await tool.execute(input);
+            const result = await tool.execute(input, this.sandbox);
             events.onToolResult(name, result, false);
             this.history.push({
               role: "tool",

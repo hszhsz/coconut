@@ -9,6 +9,7 @@ Built with TypeScript, Bun, [Ink](https://github.com/vadimdemedes/ink), and any 
 - 🖥️  Terminal UI with chat-style messaging
 - 🔧 Tool use: read/write/edit files, list directories, run shell commands
 - 🔄 Multi-turn agentic loop — the model can call tools repeatedly until done
+- 🧪 Sandboxing — run all tool operations in a Docker container or workspace-scoped local mode
 - 🔌 OpenAI-compatible — works with DeepSeek, Qwen, Moonshot, OpenAI, vLLM, Ollama, etc.
 - ⚡ Bun-powered, single-file build
 
@@ -45,6 +46,10 @@ By default, Coconut uses **`deepseek-v4-pro`** via the DeepSeek API. Override an
 | `COCONUT_API_KEY`     | falls back to `DEEPSEEK_API_KEY` | Alternative env name                     |
 | `COCONUT_MODEL`       | `deepseek-v4-pro`                | Model name                               |
 | `COCONUT_BASE_URL`    | `https://api.deepseek.com/v1`    | OpenAI-compatible chat completions URL   |
+| `COCONUT_SANDBOX`         | `local`                          | Sandbox kind: `local` or `docker`    |
+| `COCONUT_WORKSPACE`       | current working directory        | Workspace root the agent operates in |
+| `COCONUT_SANDBOX_IMAGE`   | `node:22-slim`                   | Docker image (when sandbox=`docker`) |
+| `COCONUT_SANDBOX_NETWORK` | `bridge`                         | Container network: `bridge` or `none` (offline) |
 
 ### Use a different provider
 
@@ -69,12 +74,32 @@ export COCONUT_MODEL=qwen2.5-coder
 
 ## Commands
 
-| Command   | Action                       |
-| --------- | ---------------------------- |
-| `/help`   | Show available commands      |
-| `/clear`  | Reset conversation history   |
-| `/exit`   | Quit                         |
-| `Ctrl+C`  | Quit                         |
+| Command    | Action                       |
+| ---------- | ---------------------------- |
+| `/help`    | Show available commands      |
+| `/sandbox` | Show sandbox kind + workspace |
+| `/clear`   | Reset conversation history   |
+| `/exit`    | Quit                         |
+| `Ctrl+C`   | Quit                         |
+
+## Sandbox
+
+By default Coconut runs in **`local`** sandbox mode: tools execute on the host, but every file/shell operation is confined to the workspace root (`COCONUT_WORKSPACE`, defaulting to the current directory). Attempts by the model to read or write outside the workspace are rejected.
+
+For stronger isolation set `COCONUT_SANDBOX=docker`. Coconut starts a container, mounts your workspace at `/workspace`, and routes every tool call through `docker exec`. The model cannot touch anything outside the mount. The container is removed on exit (signal handlers + a synchronous `exit` hook guarantee no leaked containers, even on hard crash).
+
+```bash
+# Isolated container, no network — for "run the model's untrusted code" workflows
+export COCONUT_SANDBOX=docker
+export COCONUT_SANDBOX_NETWORK=none
+bun run start
+
+# Or use a different image (anything with `sh` works — Alpine, Debian, your own)
+export COCONUT_SANDBOX_IMAGE=python:3.12-slim
+bun run start
+```
+
+Requirements for `docker` mode: Docker Desktop, Colima, or Lima reachable as `docker` on `PATH`.
 
 ## Tools available to the agent
 
@@ -88,18 +113,21 @@ export COCONUT_MODEL=qwen2.5-coder
 
 ```
 src/
-├── index.tsx           # Entry point — resolves env, renders App
+├── index.tsx           # Entry point — resolves env, inits sandbox, renders App
 ├── components/
 │   ├── App.tsx         # Main TUI: input box + message list
-│   └── Message.tsx     # Renders one message (user/assistant/tool/error)
+│   └── Message.tsx     # Renders one message (user/assistant/tool/info/error)
 ├── lib/
 │   ├── agent.ts        # OpenAI-compatible chat completions + tool loop
+│   ├── sandbox.ts      # Sandbox abstraction: LocalSandbox + DockerSandbox
 │   └── types.ts        # Shared types
 └── tools/
-    └── index.ts        # Tool definitions and executors
+    └── index.ts        # Sandbox-aware tool definitions and executors
 ```
 
 The agent loop in `lib/agent.ts`:
 1. POST conversation + tool schemas to `/chat/completions`
-2. If the response includes `tool_calls` → execute each tool, append results as `role: "tool"` messages, loop
+2. If the response includes `tool_calls` → execute each tool **through the sandbox**, append results as `role: "tool"` messages, loop
 3. Otherwise → done with this turn
+
+The sandbox interface (`lib/sandbox.ts`) abstracts `exec`/`readFile`/`writeFile`/`readDir`. Tools never touch the filesystem directly — every operation goes through whichever sandbox is configured.

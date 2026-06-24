@@ -1,8 +1,10 @@
+import type { Sandbox } from "./sandbox.js";
+
 export type Role = "user" | "assistant" | "system";
 
 export interface DisplayMessage {
   id: string;
-  role: Role | "tool" | "tool_result" | "error";
+  role: Role | "tool" | "tool_result" | "error" | "info";
   content: string;
   toolName?: string;
   isError?: boolean;
@@ -16,5 +18,5 @@ export interface ToolDefinition {
     properties: Record<string, unknown>;
     required?: string[];
   };
-  execute: (input: any) => Promise<string>;
+  execute: (input: any, sandbox: Sandbox) => Promise<string>;
 }

@@ -58,6 +58,17 @@ export default function Message({ message }: Props) {
         </Box>
       );
 
+    case "info":
+      return (
+        <Box marginY={0} flexDirection="column">
+          {message.content.split("\n").map((line, i) => (
+            <Text key={i} color="magenta">
+              {line}
+            </Text>
+          ))}
+        </Box>
+      );
+
     default:
       return (
         <Box>

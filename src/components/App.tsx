@@ -5,24 +5,26 @@ import Message from "./Message.js";
 import { Agent } from "../lib/agent.js";
 import { allTools } from "../tools/index.js";
 import type { DisplayMessage } from "../lib/types.js";
+import type { Sandbox } from "../lib/sandbox.js";
 
 interface Props {
   apiKey: string;
   baseURL: string;
   model: string;
+  sandbox: Sandbox;
 }
 
 let nextId = 0;
 const mkId = () => `m${++nextId}`;
 
-export default function App({ apiKey, baseURL, model }: Props) {
+export default function App({ apiKey, baseURL, model, sandbox }: Props) {
   const { exit } = useApp();
   const { stdin, setRawMode } = useStdin();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [agent] = useState(
-    () => new Agent({ apiKey, baseURL, model, tools: allTools }),
+    () => new Agent({ apiKey, baseURL, model, tools: allTools, sandbox }),
   );
 
   useEffect(() => {
@@ -65,9 +67,17 @@ export default function App({ apiKey, baseURL, model }: Props) {
       }
       if (trimmed === "/help") {
         append({
-          role: "assistant",
+          role: "info",
           content:
-            "Commands: /clear (reset chat), /exit (quit), /help. Otherwise, just type your request.",
+            "Commands: /clear (reset chat), /sandbox (show sandbox info), /exit (quit), /help. Otherwise, just type your request.",
+        });
+        setInput("");
+        return;
+      }
+      if (trimmed === "/sandbox") {
+        append({
+          role: "info",
+          content: `Sandbox: ${sandbox.label}\nWorkspace: ${sandbox.workspace}`,
         });
         setInput("");
         return;
@@ -116,7 +126,7 @@ export default function App({ apiKey, baseURL, model }: Props) {
         },
       });
     },
-    [agent, busy, append, exit],
+    [agent, busy, append, exit, sandbox],
   );
 
   return (
@@ -132,7 +142,7 @@ export default function App({ apiKey, baseURL, model }: Props) {
           🥥 Coconut
         </Text>
         <Text dimColor>
-          A minimal coding agent · model: {model} · /help for commands
+          model: {model} · sandbox: {sandbox.label} · /help for commands
         </Text>
       </Box>
 
