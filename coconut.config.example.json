@@ -1,0 +1,18 @@
+{
+  "model": "deepseek-v4-pro",
+  "baseURL": "https://api.deepseek.com/v1",
+  "apiKey": null,
+
+  "system": null,
+
+  "maxTokens": 4096,
+  "temperature": 0.3,
+  "maxIterations": 15,
+
+  "sandbox": {
+    "kind": "local",
+    "workspace": null,
+    "image": "node:22-slim",
+    "network": "bridge"
+  }
+}

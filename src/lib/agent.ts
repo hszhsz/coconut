@@ -54,6 +54,10 @@ export interface AgentConfig {
   model: string;
   tools: ToolDefinition[];
   sandbox: Sandbox;
+  systemOverride?: string | null;
+  maxTokens?: number;
+  temperature?: number;
+  maxIterations?: number;
 }
 
 const SYSTEM_PROMPT_TEMPLATE = (workspace: string, sandboxLabel: string) =>
@@ -81,6 +85,9 @@ export class Agent {
   private toolMap: Map<string, ToolDefinition>;
   private sandbox: Sandbox;
   private systemPrompt: string;
+  private maxTokens: number;
+  private temperature: number;
+  private maxIterations: number;
   private history: ChatMessage[] = [];
 
   constructor(config: AgentConfig) {
@@ -90,10 +97,17 @@ export class Agent {
     this.tools = config.tools;
     this.toolMap = new Map(this.tools.map((t) => [t.name, t]));
     this.sandbox = config.sandbox;
-    this.systemPrompt = SYSTEM_PROMPT_TEMPLATE(
+    let prompt = SYSTEM_PROMPT_TEMPLATE(
       config.sandbox.workspace,
       config.sandbox.label,
     );
+    if (config.systemOverride && config.systemOverride.trim()) {
+      prompt += `\n\nAdditional instructions:\n${config.systemOverride.trim()}`;
+    }
+    this.systemPrompt = prompt;
+    this.maxTokens = config.maxTokens ?? 4096;
+    this.temperature = config.temperature ?? 0.3;
+    this.maxIterations = config.maxIterations ?? 15;
   }
 
   reset() {
@@ -120,8 +134,8 @@ export class Agent {
         },
       })),
       tool_choice: "auto",
-      temperature: 0.3,
-      max_tokens: 4096,
+      temperature: this.temperature,
+      max_tokens: this.maxTokens,
     };
 
     const res = await fetch(`${this.baseURL}/chat/completions`, {
@@ -149,7 +163,7 @@ export class Agent {
     try {
       // Agentic tool-use loop
       // Cap iterations as a safety net
-      for (let iter = 0; iter < 15; iter++) {
+      for (let iter = 0; iter < this.maxIterations; iter++) {
         const response = await this.chatComplete(this.history);
         const choice = response.choices[0];
         if (!choice) {

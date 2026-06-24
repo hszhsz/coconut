@@ -12,19 +12,45 @@ interface Props {
   baseURL: string;
   model: string;
   sandbox: Sandbox;
+  systemOverride: string | null;
+  maxTokens: number;
+  temperature: number;
+  maxIterations: number;
+  configDescription: string;
 }
 
 let nextId = 0;
 const mkId = () => `m${++nextId}`;
 
-export default function App({ apiKey, baseURL, model, sandbox }: Props) {
+export default function App({
+  apiKey,
+  baseURL,
+  model,
+  sandbox,
+  systemOverride,
+  maxTokens,
+  temperature,
+  maxIterations,
+  configDescription,
+}: Props) {
   const { exit } = useApp();
   const { stdin, setRawMode } = useStdin();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [agent] = useState(
-    () => new Agent({ apiKey, baseURL, model, tools: allTools, sandbox }),
+    () =>
+      new Agent({
+        apiKey,
+        baseURL,
+        model,
+        tools: allTools,
+        sandbox,
+        systemOverride,
+        maxTokens,
+        temperature,
+        maxIterations,
+      }),
   );
 
   useEffect(() => {
@@ -69,7 +95,7 @@ export default function App({ apiKey, baseURL, model, sandbox }: Props) {
         append({
           role: "info",
           content:
-            "Commands: /clear (reset chat), /sandbox (show sandbox info), /exit (quit), /help. Otherwise, just type your request.",
+            "Commands: /config (show resolved config), /sandbox (show sandbox info), /clear (reset chat), /exit (quit), /help. Otherwise, just type your request.",
         });
         setInput("");
         return;
@@ -79,6 +105,11 @@ export default function App({ apiKey, baseURL, model, sandbox }: Props) {
           role: "info",
           content: `Sandbox: ${sandbox.label}\nWorkspace: ${sandbox.workspace}`,
         });
+        setInput("");
+        return;
+      }
+      if (trimmed === "/config") {
+        append({ role: "info", content: configDescription });
         setInput("");
         return;
       }
@@ -126,7 +157,7 @@ export default function App({ apiKey, baseURL, model, sandbox }: Props) {
         },
       });
     },
-    [agent, busy, append, exit, sandbox],
+    [agent, busy, append, exit, sandbox, configDescription],
   );
 
   return (
