@@ -3,23 +3,27 @@ import { Box, Text, useApp, useStdin } from "ink";
 import { TextInput, Spinner } from "@inkjs/ui";
 import Message from "./Message.js";
 import { Agent } from "../lib/agent.js";
+import { allTools } from "../tools/index.js";
 import type { DisplayMessage } from "../lib/types.js";
 
 interface Props {
   apiKey: string;
+  baseURL: string;
   model: string;
 }
 
 let nextId = 0;
 const mkId = () => `m${++nextId}`;
 
-export default function App({ apiKey, model }: Props) {
+export default function App({ apiKey, baseURL, model }: Props) {
   const { exit } = useApp();
   const { stdin, setRawMode } = useStdin();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [agent] = useState(() => new Agent(apiKey, model));
+  const [agent] = useState(
+    () => new Agent({ apiKey, baseURL, model, tools: allTools }),
+  );
 
   useEffect(() => {
     if (setRawMode) setRawMode(true);
