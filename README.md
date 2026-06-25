@@ -145,7 +145,9 @@ Coding agents burn through context fast — tool outputs, file contents, long st
 3. **Cheap history cleanup** — older bulky `tool` payloads are replaced with placeholders while preserving `tool_call_id` linkage so the message sequence remains valid.
 4. **LLM summarization** — if usage is still over threshold, history older than the last `keepRecentTurns` user turns is summarized into a single anchor message. The summary preserves goals, files, decisions, current state, pending work, user preferences, and important externalized output paths.
 5. **Run token budget** — each user turn has a run-level estimated token budget. Coconut injects a warning when the turn approaches the budget and stops additional tool work at the hard limit so it can converge instead of looping forever.
-6. **Manual override** — `/compact` runs the full compression pipeline immediately regardless of threshold.
+6. **Memory injection** — local `.md`/`.txt` memory files under `.coconut/memory/` are injected once per user turn within `memoryInjectionMaxTokens`. `type: correction` memories get a reserved budget so user corrections are not crowded out by ordinary notes.
+7. **Dynamic context** — runtime metadata such as sandbox, workspace root, and current date is injected as a user-role reminder once per turn instead of being baked into the static system prompt.
+8. **Manual override** — `/compact` runs the full compression pipeline immediately regardless of threshold.
 
 Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the last 4 user turns verbatim, externalize tool outputs above 12K characters, and warn at 80% of the run budget. Tune them in your config:
 
@@ -164,9 +166,35 @@ Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the
   "tokenBudgetWarnRatio": 0.8,
   "tokenBudgetHardRatio": 1.0,
 
-  "memoryInjectionMaxTokens": 2000
+  "memoryInjectionMaxTokens": 2000,
+  "memoryDir": ".coconut/memory",
+  "memoryInjectionGuaranteedCorrectionTokens": 500,
+  "dynamicContextEnabled": true,
+  "dynamicContextIncludeDate": true
 }
 ```
+
+### Local memory files
+
+Phase two memory injection is read-only: Coconut reads local memory files but does not write or edit them automatically.
+
+Default location:
+
+```txt
+.coconut/memory/
+```
+
+Supported files: `.md` and `.txt`. Optional frontmatter:
+
+```md
+---
+type: correction
+priority: 10
+---
+When I correct Coconut, preserve the correction before ordinary project notes.
+```
+
+Recognized `type` values include `correction`, `preference`, `project`, and `reference`; other values are accepted as ordinary memories. Higher `priority` values are selected first. Missing frontmatter defaults to `type: reference` and `priority: 0`.
 
 > Token counts are heuristic, not provider-billed counts. They are intentionally provider-independent so Coconut can work with any OpenAI-compatible endpoint.
 >
