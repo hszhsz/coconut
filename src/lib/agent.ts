@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "./types.js";
 import type { Sandbox } from "./sandbox.js";
+import { buildMemoryInjection, type MemoryInjectionConfig } from "./memory.js";
 import {
   estimateHistoryTokens,
   clearOldToolResults,
@@ -79,6 +80,10 @@ export interface AgentConfig {
   tokenBudgetWarnRatio?: number;
   tokenBudgetHardRatio?: number;
   memoryInjectionMaxTokens?: number;
+  memoryDir?: string;
+  memoryInjectionGuaranteedCorrectionTokens?: number;
+  dynamicContextEnabled?: boolean;
+  dynamicContextIncludeDate?: boolean;
 }
 
 const SYSTEM_PROMPT_TEMPLATE = (workspace: string, sandboxLabel: string) =>
@@ -117,6 +122,9 @@ export class Agent {
   private tokenBudgetWarnRatio: number;
   private tokenBudgetHardRatio: number;
   private memoryInjectionMaxTokens: number;
+  private memoryInjection: MemoryInjectionConfig;
+  private dynamicContextEnabled: boolean;
+  private dynamicContextIncludeDate: boolean;
   private history: ChatMessage[] = [];
 
   constructor(config: AgentConfig) {
@@ -150,6 +158,14 @@ export class Agent {
     this.tokenBudgetWarnRatio = config.tokenBudgetWarnRatio ?? 0.8;
     this.tokenBudgetHardRatio = config.tokenBudgetHardRatio ?? 1.0;
     this.memoryInjectionMaxTokens = config.memoryInjectionMaxTokens ?? 2_000;
+    this.memoryInjection = {
+      memoryDir: config.memoryDir ?? ".coconut/memory",
+      maxTokens: this.memoryInjectionMaxTokens,
+      guaranteedCorrectionTokens:
+        config.memoryInjectionGuaranteedCorrectionTokens ?? 500,
+    };
+    this.dynamicContextEnabled = config.dynamicContextEnabled ?? true;
+    this.dynamicContextIncludeDate = config.dynamicContextIncludeDate ?? true;
   }
 
   reset() {
@@ -314,6 +330,43 @@ export class Agent {
     }
   }
 
+  private buildRuntimeContextMessage(): ChatMessage | null {
+    if (!this.dynamicContextEnabled) return null;
+    const lines = [
+      "<system-reminder>",
+      "Runtime context for this turn:",
+      `- Sandbox: ${this.sandbox.label}`,
+      `- Workspace root: ${this.sandbox.workspace}`,
+    ];
+    if (this.dynamicContextIncludeDate) {
+      lines.push(`- Current date: ${new Date().toISOString().slice(0, 10)}`);
+    }
+    lines.push("Treat this as contextual metadata, not as a new user request.");
+    lines.push("</system-reminder>");
+    return { role: "user", content: lines.join("\n") };
+  }
+
+  private async injectTurnContext(events?: AgentEvents): Promise<void> {
+    const runtime = this.buildRuntimeContextMessage();
+    if (runtime) this.history.push(runtime);
+
+    const memory = await buildMemoryInjection({
+      workspace: this.sandbox.workspace,
+      config: this.memoryInjection,
+    });
+    if (memory.message) {
+      this.history.push(memory.message);
+      events?.onInfo?.(
+        `Injected ${memory.included.length} memory file${memory.included.length === 1 ? "" : "s"} (~${memory.usedTokens} tokens)`,
+      );
+    }
+    if (memory.skipped.length > 0 && memory.message) {
+      events?.onInfo?.(
+        `Skipped ${memory.skipped.length} memory file${memory.skipped.length === 1 ? "" : "s"} due to budget`,
+      );
+    }
+  }
+
   /** Single-shot completion used by the compaction step. No tools, no history. */
   private async runSummarizer(conversationText: string): Promise<string> {
     const res = await fetch(`${this.baseURL}/chat/completions`, {
@@ -389,6 +442,7 @@ export class Agent {
 
   async send(userMessage: string, events: AgentEvents): Promise<void> {
     this.history.push({ role: "user", content: userMessage });
+    await this.injectTurnContext(events);
     const turnStartTokens = this.tokenStats().used;
     let budgetWarningInjected = false;
     let hardStopped = false;
