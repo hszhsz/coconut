@@ -25,6 +25,10 @@ describe("loadConfig compression budget fields", () => {
       expect(cfg.tokenBudgetWarnRatio).toBe(0.8);
       expect(cfg.tokenBudgetHardRatio).toBe(1.0);
       expect(cfg.memoryInjectionMaxTokens).toBe(2_000);
+      expect(cfg.memoryDir).toBe(".coconut/memory");
+      expect(cfg.memoryInjectionGuaranteedCorrectionTokens).toBe(500);
+      expect(cfg.dynamicContextEnabled).toBe(true);
+      expect(cfg.dynamicContextIncludeDate).toBe(true);
     });
   });
 
@@ -41,6 +45,10 @@ describe("loadConfig compression budget fields", () => {
           tokenBudgetWarnRatio: 0.5,
           tokenBudgetHardRatio: 0.75,
           memoryInjectionMaxTokens: 333,
+          memoryDir: ".custom/memory",
+          memoryInjectionGuaranteedCorrectionTokens: 111,
+          dynamicContextEnabled: false,
+          dynamicContextIncludeDate: false,
         }),
       );
 
@@ -53,6 +61,10 @@ describe("loadConfig compression budget fields", () => {
       expect(cfg.tokenBudgetWarnRatio).toBe(0.5);
       expect(cfg.tokenBudgetHardRatio).toBe(0.75);
       expect(cfg.memoryInjectionMaxTokens).toBe(333);
+      expect(cfg.memoryDir).toBe(".custom/memory");
+      expect(cfg.memoryInjectionGuaranteedCorrectionTokens).toBe(111);
+      expect(cfg.dynamicContextEnabled).toBe(false);
+      expect(cfg.dynamicContextIncludeDate).toBe(false);
     });
   });
 });

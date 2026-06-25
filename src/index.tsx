@@ -89,6 +89,10 @@ async function main() {
       tokenBudgetWarnRatio={cfg!.tokenBudgetWarnRatio}
       tokenBudgetHardRatio={cfg!.tokenBudgetHardRatio}
       memoryInjectionMaxTokens={cfg!.memoryInjectionMaxTokens}
+      memoryDir={cfg!.memoryDir}
+      memoryInjectionGuaranteedCorrectionTokens={cfg!.memoryInjectionGuaranteedCorrectionTokens}
+      dynamicContextEnabled={cfg!.dynamicContextEnabled}
+      dynamicContextIncludeDate={cfg!.dynamicContextIncludeDate}
       configDescription={describeConfig(cfg!)}
     />,
   );

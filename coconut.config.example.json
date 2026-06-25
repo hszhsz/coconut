@@ -23,6 +23,10 @@
   "tokenBudgetHardRatio": 1.0,
 
   "memoryInjectionMaxTokens": 2000,
+  "memoryDir": ".coconut/memory",
+  "memoryInjectionGuaranteedCorrectionTokens": 500,
+  "dynamicContextEnabled": true,
+  "dynamicContextIncludeDate": true,
 
   "sandbox": {
     "kind": "local",

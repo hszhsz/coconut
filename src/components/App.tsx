@@ -27,6 +27,10 @@ interface Props {
   tokenBudgetWarnRatio: number;
   tokenBudgetHardRatio: number;
   memoryInjectionMaxTokens: number;
+  memoryDir: string;
+  memoryInjectionGuaranteedCorrectionTokens: number;
+  dynamicContextEnabled: boolean;
+  dynamicContextIncludeDate: boolean;
   configDescription: string;
 }
 
@@ -53,6 +57,10 @@ export default function App({
   tokenBudgetWarnRatio,
   tokenBudgetHardRatio,
   memoryInjectionMaxTokens,
+  memoryDir,
+  memoryInjectionGuaranteedCorrectionTokens,
+  dynamicContextEnabled,
+  dynamicContextIncludeDate,
   configDescription,
 }: Props) {
   const { exit } = useApp();
@@ -87,6 +95,10 @@ export default function App({
         tokenBudgetWarnRatio,
         tokenBudgetHardRatio,
         memoryInjectionMaxTokens,
+        memoryDir,
+        memoryInjectionGuaranteedCorrectionTokens,
+        dynamicContextEnabled,
+        dynamicContextIncludeDate,
       }),
   );
 

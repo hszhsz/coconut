@@ -32,6 +32,10 @@ export const ConfigSchema = z
     tokenBudgetWarnRatio: z.number().min(0.1).max(0.99).optional(),
     tokenBudgetHardRatio: z.number().min(0.1).max(1).optional(),
     memoryInjectionMaxTokens: z.number().int().min(0).optional(),
+    memoryDir: z.string().min(1).optional(),
+    memoryInjectionGuaranteedCorrectionTokens: z.number().int().min(0).optional(),
+    dynamicContextEnabled: z.boolean().optional(),
+    dynamicContextIncludeDate: z.boolean().optional(),
     sandbox: SandboxSchema.optional(),
   })
   .strict();
@@ -57,6 +61,10 @@ export interface ResolvedConfig {
   tokenBudgetWarnRatio: number;
   tokenBudgetHardRatio: number;
   memoryInjectionMaxTokens: number;
+  memoryDir: string;
+  memoryInjectionGuaranteedCorrectionTokens: number;
+  dynamicContextEnabled: boolean;
+  dynamicContextIncludeDate: boolean;
   sandbox: {
     kind: "local" | "docker";
     workspace: string;
@@ -87,6 +95,10 @@ const DEFAULTS: Omit<ResolvedConfig, "source"> = {
   tokenBudgetWarnRatio: 0.8,
   tokenBudgetHardRatio: 1.0,
   memoryInjectionMaxTokens: 2_000,
+  memoryDir: ".coconut/memory",
+  memoryInjectionGuaranteedCorrectionTokens: 500,
+  dynamicContextEnabled: true,
+  dynamicContextIncludeDate: true,
   sandbox: {
     kind: "local",
     workspace: process.cwd(),
@@ -237,6 +249,26 @@ function envOverrides(): ConfigFile {
       );
     out.memoryInjectionMaxTokens = n;
   }
+  if (process.env.COCONUT_MEMORY_DIR) {
+    out.memoryDir = process.env.COCONUT_MEMORY_DIR;
+  }
+  if (process.env.COCONUT_MEMORY_INJECTION_GUARANTEED_CORRECTION_TOKENS) {
+    const n = Number(
+      process.env.COCONUT_MEMORY_INJECTION_GUARANTEED_CORRECTION_TOKENS,
+    );
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_MEMORY_INJECTION_GUARANTEED_CORRECTION_TOKENS must be a non-negative integer",
+      );
+    out.memoryInjectionGuaranteedCorrectionTokens = n;
+  }
+  if (process.env.COCONUT_DYNAMIC_CONTEXT_ENABLED) {
+    out.dynamicContextEnabled = process.env.COCONUT_DYNAMIC_CONTEXT_ENABLED !== "false";
+  }
+  if (process.env.COCONUT_DYNAMIC_CONTEXT_INCLUDE_DATE) {
+    out.dynamicContextIncludeDate =
+      process.env.COCONUT_DYNAMIC_CONTEXT_INCLUDE_DATE !== "false";
+  }
 
   const sb: NonNullable<ConfigFile["sandbox"]> = {};
   let sbTouched = false;
@@ -329,6 +361,14 @@ export async function loadConfig(opts?: {
       merged.tokenBudgetHardRatio ?? DEFAULTS.tokenBudgetHardRatio,
     memoryInjectionMaxTokens:
       merged.memoryInjectionMaxTokens ?? DEFAULTS.memoryInjectionMaxTokens,
+    memoryDir: merged.memoryDir ?? DEFAULTS.memoryDir,
+    memoryInjectionGuaranteedCorrectionTokens:
+      merged.memoryInjectionGuaranteedCorrectionTokens ??
+      DEFAULTS.memoryInjectionGuaranteedCorrectionTokens,
+    dynamicContextEnabled:
+      merged.dynamicContextEnabled ?? DEFAULTS.dynamicContextEnabled,
+    dynamicContextIncludeDate:
+      merged.dynamicContextIncludeDate ?? DEFAULTS.dynamicContextIncludeDate,
     sandbox: {
       kind: sb.kind ?? DEFAULTS.sandbox.kind,
       workspace: path.resolve(sb.workspace ?? cwd),
@@ -368,6 +408,10 @@ export function describeConfig(cfg: ResolvedConfig): string {
     `tokenBudgetWarnRatio:         ${cfg.tokenBudgetWarnRatio}`,
     `tokenBudgetHardRatio:         ${cfg.tokenBudgetHardRatio}`,
     `memoryInjectionMaxTokens:     ${cfg.memoryInjectionMaxTokens}`,
+    `memoryDir:                    ${cfg.memoryDir}`,
+    `memoryInjectionGuaranteedCorrectionTokens: ${cfg.memoryInjectionGuaranteedCorrectionTokens}`,
+    `dynamicContextEnabled:        ${cfg.dynamicContextEnabled}`,
+    `dynamicContextIncludeDate:    ${cfg.dynamicContextIncludeDate}`,
     `sandbox.kind:  ${cfg.sandbox.kind}`,
     `sandbox.workspace: ${cfg.sandbox.workspace}`,
   ];
@@ -410,6 +454,10 @@ export const EXAMPLE_CONFIG: ConfigFile = {
   tokenBudgetWarnRatio: 0.8,
   tokenBudgetHardRatio: 1.0,
   memoryInjectionMaxTokens: 2_000,
+  memoryDir: ".coconut/memory",
+  memoryInjectionGuaranteedCorrectionTokens: 500,
+  dynamicContextEnabled: true,
+  dynamicContextIncludeDate: true,
   sandbox: {
     kind: "local",
     workspace: null,
