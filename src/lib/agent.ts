@@ -4,8 +4,10 @@ import {
   estimateHistoryTokens,
   clearOldToolResults,
   compactHistory,
+  maybeExternalizeToolResult,
   SUMMARIZATION_SYSTEM_PROMPT,
   type TokenStats,
+  type ToolOutputBudgetConfig,
 } from "./compaction.js";
 
 export type Role = "system" | "user" | "assistant" | "tool";
@@ -69,6 +71,14 @@ export interface AgentConfig {
   contextWindow?: number;
   compressionThreshold?: number;
   keepRecentTurns?: number;
+  toolOutputExternalizeMinChars?: number;
+  toolOutputPreviewHeadChars?: number;
+  toolOutputPreviewTailChars?: number;
+  toolOutputDir?: string;
+  tokenBudgetMax?: number;
+  tokenBudgetWarnRatio?: number;
+  tokenBudgetHardRatio?: number;
+  memoryInjectionMaxTokens?: number;
 }
 
 const SYSTEM_PROMPT_TEMPLATE = (workspace: string, sandboxLabel: string) =>
@@ -102,6 +112,11 @@ export class Agent {
   private contextWindow: number;
   private compressionThreshold: number;
   private keepRecentTurns: number;
+  private toolOutputBudget: ToolOutputBudgetConfig;
+  private tokenBudgetMax: number;
+  private tokenBudgetWarnRatio: number;
+  private tokenBudgetHardRatio: number;
+  private memoryInjectionMaxTokens: number;
   private history: ChatMessage[] = [];
 
   constructor(config: AgentConfig) {
@@ -125,6 +140,16 @@ export class Agent {
     this.contextWindow = config.contextWindow ?? 64_000;
     this.compressionThreshold = config.compressionThreshold ?? 0.7;
     this.keepRecentTurns = config.keepRecentTurns ?? 4;
+    this.toolOutputBudget = {
+      externalizeMinChars: config.toolOutputExternalizeMinChars ?? 12_000,
+      previewHeadChars: config.toolOutputPreviewHeadChars ?? 2_000,
+      previewTailChars: config.toolOutputPreviewTailChars ?? 1_000,
+      outputDir: config.toolOutputDir ?? ".coconut/tool-results",
+    };
+    this.tokenBudgetMax = config.tokenBudgetMax ?? 200_000;
+    this.tokenBudgetWarnRatio = config.tokenBudgetWarnRatio ?? 0.8;
+    this.tokenBudgetHardRatio = config.tokenBudgetHardRatio ?? 1.0;
+    this.memoryInjectionMaxTokens = config.memoryInjectionMaxTokens ?? 2_000;
   }
 
   reset() {
@@ -224,6 +249,71 @@ export class Agent {
     };
   }
 
+  private estimatedRunTokens(startTokens: number): number {
+    return Math.max(0, this.tokenStats().used - startTokens);
+  }
+
+  private shouldWarnBudget(startTokens: number): boolean {
+    return (
+      this.estimatedRunTokens(startTokens) >=
+      this.tokenBudgetMax * this.tokenBudgetWarnRatio
+    );
+  }
+
+  private shouldHardStopBudget(startTokens: number): boolean {
+    return (
+      this.estimatedRunTokens(startTokens) >=
+      this.tokenBudgetMax * this.tokenBudgetHardRatio
+    );
+  }
+
+  private budgetWarningMessage(): ChatMessage {
+    return {
+      role: "user",
+      content:
+        `<system-reminder>\n` +
+        `You are nearing this turn's token budget. Avoid unnecessary tool calls, summarize what matters, and work toward a final answer.\n` +
+        `</system-reminder>`,
+    };
+  }
+
+  private async prepareToolResultForHistory(
+    name: string,
+    input: unknown,
+    result: string,
+    onInfo?: (msg: string) => void,
+  ): Promise<string> {
+    try {
+      const prepared = await maybeExternalizeToolResult({
+        workspace: this.sandbox.workspace,
+        toolName: name,
+        toolInput: input,
+        content: result,
+        config: this.toolOutputBudget,
+      });
+      if (prepared.externalized && prepared.filePath) {
+        onInfo?.(
+          `Saved full ${name} output to ${prepared.filePath} (${prepared.originalChars.toLocaleString()} chars, ~${prepared.estimatedTokens.toLocaleString()} tokens)`,
+        );
+      }
+      return prepared.content;
+    } catch (e: any) {
+      const head = result.slice(0, this.toolOutputBudget.previewHeadChars);
+      const tail =
+        this.toolOutputBudget.previewTailChars > 0
+          ? result.slice(
+              Math.max(
+                this.toolOutputBudget.previewHeadChars,
+                result.length - this.toolOutputBudget.previewTailChars,
+              ),
+            )
+          : "";
+      const omitted = Math.max(0, result.length - head.length - tail.length);
+      const note = `[Tool output persistence failed: ${e?.message ?? e}. Showing bounded preview; ${omitted} chars omitted.]`;
+      return tail ? `${head}\n\n${note}\n\n${tail}` : `${head}\n\n${note}`;
+    }
+  }
+
   /** Single-shot completion used by the compaction step. No tools, no history. */
   private async runSummarizer(conversationText: string): Promise<string> {
     const res = await fetch(`${this.baseURL}/chat/completions`, {
@@ -299,6 +389,10 @@ export class Agent {
 
   async send(userMessage: string, events: AgentEvents): Promise<void> {
     this.history.push({ role: "user", content: userMessage });
+    const turnStartTokens = this.tokenStats().used;
+    let budgetWarningInjected = false;
+    let hardStopped = false;
+    void this.memoryInjectionMaxTokens;
 
     try {
       // Check budget *before* the model call. If we're over threshold,
@@ -315,6 +409,36 @@ export class Agent {
       // Agentic tool-use loop
       // Cap iterations as a safety net
       for (let iter = 0; iter < this.maxIterations; iter++) {
+        if (this.shouldHardStopBudget(turnStartTokens)) {
+          hardStopped = true;
+          events.onInfo?.(
+            "Token budget hard stop reached; asking for a final answer without more tool calls.",
+          );
+          this.history.push({
+            role: "user",
+            content:
+              `<system-reminder>\n` +
+              `This turn has reached its token budget. Do not call tools. Provide the best final answer from the current context, including any limitations.\n` +
+              `</system-reminder>`,
+          });
+          const response = await this.chatComplete(this.history);
+          const choice = response.choices[0];
+          if (choice?.message.content) events.onText(choice.message.content);
+          if (choice) {
+            this.history.push({
+              role: "assistant",
+              content: choice.message.content ?? "",
+            });
+          }
+          break;
+        }
+
+        if (!budgetWarningInjected && this.shouldWarnBudget(turnStartTokens)) {
+          budgetWarningInjected = true;
+          this.history.push(this.budgetWarningMessage());
+          events.onInfo?.("Token budget warning injected; asking Coconut to converge.");
+        }
+
         const response = await this.chatComplete(this.history);
         const choice = response.choices[0];
         if (!choice) {
@@ -373,27 +497,44 @@ export class Agent {
 
           try {
             const result = await tool.execute(input, this.sandbox);
-            events.onToolResult(name, result, false);
+            const historyContent = await this.prepareToolResultForHistory(
+              name,
+              input,
+              result,
+              events.onInfo,
+            );
+            events.onToolResult(name, historyContent, false);
             this.history.push({
               role: "tool",
               tool_call_id: call.id,
               name,
-              content: result,
+              content: historyContent,
             });
           } catch (e: any) {
             const msg = e?.message || String(e);
-            events.onToolResult(name, msg, true);
+            const errorContent = await this.prepareToolResultForHistory(
+              name,
+              input,
+              `Error: ${msg}`,
+              events.onInfo,
+            );
+            events.onToolResult(name, errorContent, true);
             this.history.push({
               role: "tool",
               tool_call_id: call.id,
               name,
-              content: `Error: ${msg}`,
+              content: errorContent,
             });
           }
         }
         // Loop: let the model react to tool results
       }
 
+      if (hardStopped) {
+        events.onInfo?.(
+          "Stopped additional tool work because the run token budget was exhausted.",
+        );
+      }
       events.onDone();
     } catch (e: any) {
       events.onError(e instanceof Error ? e : new Error(String(e)));
