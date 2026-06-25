@@ -131,6 +131,9 @@ export COCONUT_MODEL=qwen2.5-coder
 | `/config`  | Show resolved config (paths + values, key redacted) |
 | `/sandbox` | Show sandbox kind + workspace           |
 | `/tokens`  | Show current token usage and compaction threshold |
+| `/context` | Show compression status: tokens, budget, dynamic context, memory, retention |
+| `/remember <text>` | Save a local memory note under `.coconut/memory/notes/` |
+| `/memory`  | List memory files; `/memory show <path>` or `/memory delete <path>` |
 | `/compact` | Force-compress conversation history right now |
 | `/clear`   | Reset conversation history              |
 | `/exit`    | Quit                                    |
@@ -141,7 +144,7 @@ export COCONUT_MODEL=qwen2.5-coder
 Coding agents burn through context fast — tool outputs, file contents, long stack traces. Coconut uses a DeerFlow-inspired layered compression strategy while staying provider-neutral and OpenAI-compatible.
 
 1. **Token estimation** — every message in history is measured with a lightweight mixed ASCII/CJK heuristic. The TUI header shows `tokens: 12.3K / 64K (19%)`, color-coded green → yellow → red as you approach the threshold.
-2. **Tool output budget** — large tool results are saved under `.coconut/tool-results/`. The conversation keeps only a head/tail preview with the saved file path. Use `read_file` on that path when the full output is needed.
+2. **Tool output budget** — large tool results are saved under `.coconut/tool-results/`. The conversation keeps only a head/tail preview with the saved file path. Use `read_file` on that path when the full output is needed. Saved files are pruned oldest-first once `toolOutputRetentionMaxFiles` or `toolOutputRetentionMaxBytes` is exceeded.
 3. **Cheap history cleanup** — older bulky `tool` payloads are replaced with placeholders while preserving `tool_call_id` linkage so the message sequence remains valid.
 4. **LLM summarization** — if usage is still over threshold, history older than the last `keepRecentTurns` user turns is summarized into a single anchor message. The summary preserves goals, files, decisions, current state, pending work, user preferences, and important externalized output paths.
 5. **Run token budget** — each user turn has a run-level estimated token budget. Coconut injects a warning when the turn approaches the budget and stops additional tool work at the hard limit so it can converge instead of looping forever.
@@ -161,6 +164,8 @@ Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the
   "toolOutputPreviewHeadChars": 2000,
   "toolOutputPreviewTailChars": 1000,
   "toolOutputDir": ".coconut/tool-results",
+  "toolOutputRetentionMaxFiles": 200,
+  "toolOutputRetentionMaxBytes": 52428800,
 
   "tokenBudgetMax": 200000,
   "tokenBudgetWarnRatio": 0.8,

@@ -3,6 +3,12 @@ import { Box, Text, useApp, useStdin } from "ink";
 import { TextInput, Spinner } from "@inkjs/ui";
 import Message from "./Message.js";
 import { Agent } from "../lib/agent.js";
+import {
+  createMemoryNote,
+  listMemoryFiles,
+  readMemoryFile,
+  deleteMemoryFile,
+} from "../lib/memory.js";
 import { allTools } from "../tools/index.js";
 import type { DisplayMessage } from "../lib/types.js";
 import type { Sandbox } from "../lib/sandbox.js";
@@ -151,7 +157,7 @@ export default function App({
         append({
           role: "info",
           content:
-            "Commands: /config, /sandbox, /tokens (show usage), /compact (force-compress now), /clear (reset chat), /exit, /help. Otherwise, just type your request.",
+            "Commands: /config, /sandbox, /tokens, /context (compression status), /remember <text>, /memory [show|delete <path>], /compact (force-compress now), /clear (reset chat), /exit, /help. Otherwise, just type your request.",
         });
         setInput("");
         return;
@@ -177,6 +183,94 @@ export default function App({
           content: `Tokens: ${s.used.toLocaleString()} / ${s.window.toLocaleString()} (${pct}%)\nAuto-compact triggers at ${(compressionThreshold * 100).toFixed(0)}%\nRun budget: ${tokenBudgetMax.toLocaleString()} tokens (warn ${(tokenBudgetWarnRatio * 100).toFixed(0)}%, hard ${(tokenBudgetHardRatio * 100).toFixed(0)}%)`,
         });
         setInput("");
+        return;
+      }
+      if (trimmed === "/context") {
+        const s = agent.tokenStats();
+        const pct = (s.ratio * 100).toFixed(1);
+        try {
+          const files = await listMemoryFiles({
+            workspace: sandbox.workspace,
+            memoryDir,
+          });
+          const memBytes = files.reduce((n, f) => n + f.sizeBytes, 0);
+          const lines = [
+            `Tokens: ${s.used.toLocaleString()} / ${s.window.toLocaleString()} (${pct}%)`,
+            `Auto-compact at ${(compressionThreshold * 100).toFixed(0)}% · run budget ${tokenBudgetMax.toLocaleString()} (warn ${(tokenBudgetWarnRatio * 100).toFixed(0)}%, hard ${(tokenBudgetHardRatio * 100).toFixed(0)}%)`,
+            `Dynamic context: ${dynamicContextEnabled ? "on" : "off"}${dynamicContextEnabled && dynamicContextIncludeDate ? " (with date)" : ""}`,
+            `Memory: ${files.length} file${files.length === 1 ? "" : "s"}, ${memBytes.toLocaleString()} bytes in ${memoryDir} (budget ${memoryInjectionMaxTokens.toLocaleString()} tokens)`,
+            `Tool-result retention: ${toolOutputRetentionMaxFiles} files / ${toolOutputRetentionMaxBytes.toLocaleString()} bytes in ${toolOutputDir}`,
+          ];
+          append({ role: "info", content: lines.join("\n") });
+        } catch (e: any) {
+          append({ role: "error", content: `Context status failed: ${e?.message ?? e}` });
+        }
+        setInput("");
+        return;
+      }
+      if (trimmed.startsWith("/remember")) {
+        const text = trimmed.slice("/remember".length).trim();
+        setInput("");
+        if (!text) {
+          append({ role: "info", content: "Usage: /remember <text to remember>" });
+          return;
+        }
+        try {
+          const rel = await createMemoryNote({
+            workspace: sandbox.workspace,
+            memoryDir,
+            text,
+            timestamp: Date.now(),
+          });
+          append({ role: "info", content: `Saved memory: ${rel}` });
+        } catch (e: any) {
+          append({ role: "error", content: `Could not save memory: ${e?.message ?? e}` });
+        }
+        return;
+      }
+      if (trimmed === "/memory" || trimmed.startsWith("/memory ")) {
+        const rest = trimmed.slice("/memory".length).trim();
+        setInput("");
+        try {
+          if (!rest) {
+            const files = await listMemoryFiles({
+              workspace: sandbox.workspace,
+              memoryDir,
+            });
+            if (files.length === 0) {
+              append({ role: "info", content: `No memory files in ${memoryDir}` });
+            } else {
+              const lines = files.map(
+                (f) =>
+                  `${f.relPath} [${f.type}, priority ${f.priority}, ${f.sizeBytes} bytes]`,
+              );
+              append({ role: "info", content: lines.join("\n") });
+            }
+          } else if (rest.startsWith("show ")) {
+            const rel = rest.slice("show ".length).trim();
+            const content = await readMemoryFile({
+              workspace: sandbox.workspace,
+              memoryDir,
+              relPath: rel,
+            });
+            append({ role: "info", content: `${rel}:\n${content}` });
+          } else if (rest.startsWith("delete ")) {
+            const rel = rest.slice("delete ".length).trim();
+            const deleted = await deleteMemoryFile({
+              workspace: sandbox.workspace,
+              memoryDir,
+              relPath: rel,
+            });
+            append({ role: "info", content: `Deleted memory: ${deleted}` });
+          } else {
+            append({
+              role: "info",
+              content: "Usage: /memory | /memory show <path> | /memory delete <path>",
+            });
+          }
+        } catch (e: any) {
+          append({ role: "error", content: `Memory command failed: ${e?.message ?? e}` });
+        }
         return;
       }
       if (trimmed === "/compact") {
@@ -259,6 +353,13 @@ export default function App({
       tokenBudgetMax,
       tokenBudgetWarnRatio,
       tokenBudgetHardRatio,
+      memoryDir,
+      memoryInjectionMaxTokens,
+      dynamicContextEnabled,
+      dynamicContextIncludeDate,
+      toolOutputDir,
+      toolOutputRetentionMaxFiles,
+      toolOutputRetentionMaxBytes,
     ],
   );
 
