@@ -1,18 +1,20 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { randomBytes } from "node:crypto";
 import type { ChatMessage } from "./agent.js";
 
 /**
  * Heuristic token estimator.
  * - Non-CJK: ~4 chars/token (standard OpenAI/DeepSeek BPE approximation)
- * - CJK (Chinese/Japanese/Korean): ~1 char/token
+ * - CJK (Chinese/Japanese/Korean): ~2 chars/token
  * Within ~15% of actual count for typical mixed traffic — accurate enough
  * to drive compression decisions without bundling a tokenizer.
  */
 export function estimateTokens(s: string | null | undefined): number {
   if (!s) return 0;
-  const cjk = (s.match(/[一-鿿぀-ヿ가-힯]/g) || [])
-    .length;
+  const cjk = (s.match(/[一-鿿぀-ヿ가-힯]/g) || []).length;
   const nonCjk = s.length - cjk;
-  return Math.ceil(cjk + nonCjk / 4);
+  return Math.ceil(cjk / 2 + nonCjk / 4);
 }
 
 const PER_MESSAGE_OVERHEAD = 5;
@@ -43,6 +45,123 @@ export interface TokenStats {
   used: number;
   window: number;
   ratio: number;
+}
+
+export interface ToolOutputBudgetConfig {
+  externalizeMinChars: number;
+  previewHeadChars: number;
+  previewTailChars: number;
+  outputDir: string;
+}
+
+export interface ExternalizedToolResult {
+  content: string;
+  externalized: boolean;
+  filePath?: string;
+  originalChars: number;
+  estimatedTokens: number;
+}
+
+const EXTERNALIZED_MARKER = "[Full ";
+const EXTERNALIZED_SAVED_TO = " output saved to ";
+
+export function isExternalizedToolResult(
+  content: string | null | undefined,
+): boolean {
+  return Boolean(
+    content &&
+      content.includes(EXTERNALIZED_MARKER) &&
+      content.includes(EXTERNALIZED_SAVED_TO) &&
+      content.includes("Use read_file to inspect the full content"),
+  );
+}
+
+function safeToolName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "tool";
+}
+
+function isToolResultFileRead(
+  toolName: string,
+  toolInput: unknown,
+  outputDir: string,
+): boolean {
+  if (toolName !== "read_file") return false;
+  if (!toolInput || typeof toolInput !== "object") return false;
+  const p = (toolInput as { path?: unknown }).path;
+  if (typeof p !== "string") return false;
+  const normalizedInput = p.replace(/\\/g, "/");
+  const normalizedDir = outputDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedInput === normalizedDir || normalizedInput.startsWith(`${normalizedDir}/`);
+}
+
+function formatExternalizedPreview(opts: {
+  toolName: string;
+  content: string;
+  filePath: string;
+  headChars: number;
+  tailChars: number;
+}): string {
+  const { toolName, content, filePath, headChars, tailChars } = opts;
+  const head = headChars > 0 ? content.slice(0, headChars) : "";
+  const tail =
+    tailChars > 0
+      ? content.slice(Math.max(headChars, content.length - tailChars))
+      : "";
+  const omitted = Math.max(0, content.length - head.length - tail.length);
+  const marker = `[Full ${toolName} output saved to ${filePath} (${content.length} chars, ~${estimateTokens(content)} tokens). Use read_file to inspect the full content. ${omitted} chars omitted from this preview.]`;
+  if (head && tail) return `${head}\n\n${marker}\n\n${tail}`;
+  if (head) return `${head}\n\n${marker}`;
+  if (tail) return `${marker}\n\n${tail}`;
+  return marker;
+}
+
+export async function maybeExternalizeToolResult(opts: {
+  workspace: string;
+  toolName: string;
+  toolInput?: unknown;
+  content: string;
+  config: ToolOutputBudgetConfig;
+}): Promise<ExternalizedToolResult> {
+  const { workspace, toolName, toolInput, content, config } = opts;
+  const originalChars = content.length;
+  const estimatedTokens = estimateTokens(content);
+
+  if (originalChars < config.externalizeMinChars) {
+    return { content, externalized: false, originalChars, estimatedTokens };
+  }
+  if (isExternalizedToolResult(content)) {
+    return { content, externalized: false, originalChars, estimatedTokens };
+  }
+  if (isToolResultFileRead(toolName, toolInput, config.outputDir)) {
+    return { content, externalized: false, originalChars, estimatedTokens };
+  }
+
+  const relDir = config.outputDir.replace(/^\/+/, "");
+  const absDir = path.resolve(workspace, relDir);
+  const workspaceRoot = path.resolve(workspace);
+  if (absDir !== workspaceRoot && !absDir.startsWith(workspaceRoot + path.sep)) {
+    throw new Error(`toolOutputDir ${config.outputDir} resolves outside the workspace`);
+  }
+
+  await fs.mkdir(absDir, { recursive: true });
+  const fileName = `${safeToolName(toolName)}-${Date.now()}-${randomBytes(4).toString("hex")}.log`;
+  const absPath = path.join(absDir, fileName);
+  await fs.writeFile(absPath, content, "utf-8");
+  const filePath = path.posix.join(relDir.replace(/\\/g, "/"), fileName);
+
+  return {
+    content: formatExternalizedPreview({
+      toolName,
+      content,
+      filePath,
+      headChars: config.previewHeadChars,
+      tailChars: config.previewTailChars,
+    }),
+    externalized: true,
+    filePath,
+    originalChars,
+    estimatedTokens,
+  };
 }
 
 /**
@@ -84,8 +203,9 @@ export function clearOldToolResults(
     if (!ageByIndex[i]) return m;
     if (m.role !== "tool") return m;
     const content = m.content ?? "";
-    // Skip already-cleared or trivially small results.
+    // Skip already-cleared, externalized, or trivially small results.
     if (content.startsWith("[older tool result cleared")) return m;
+    if (isExternalizedToolResult(content)) return m;
     if (content.length < 200) return m;
     cleared++;
     const before = estimateTokens(content);
@@ -208,6 +328,7 @@ Produce a dense, structured summary covering:
 3. **Decisions & approaches tried** — including failed attempts and the reasons they failed
 4. **Current state** — what's been done, what's in progress, what's pending
 5. **User preferences** — any style, naming, or tooling preferences expressed
+6. **Externalized tool outputs** — saved .coconut/tool-results paths that may still matter, with why they matter
 
 Use markdown bullet points. Be specific — preserve exact names, paths, and identifiers. Drop pleasantries, meta-commentary, and verbose tool outputs that aren't load-bearing. Keep under 600 words.
 
