@@ -144,3 +144,92 @@ test("formats memory context as user-role context rather than a new request", as
     );
   });
 });
+
+import {
+  createMemoryNote,
+  listMemoryFiles,
+  readMemoryFile,
+  deleteMemoryFile,
+} from "./memory.js";
+
+describe("memory lifecycle", () => {
+  test("createMemoryNote writes a frontmatter note under notes/", async () => {
+    await withTempDir(async (workspace) => {
+      const rel = await createMemoryNote({
+        workspace,
+        memoryDir: ".coconut/memory",
+        text: "Prefer table-driven tests.",
+      });
+      expect(rel.startsWith(".coconut/memory/notes/")).toBe(true);
+
+      const content = await readMemoryFile({
+        workspace,
+        memoryDir: ".coconut/memory",
+        relPath: rel,
+      });
+      expect(content).toContain("type: reference");
+      expect(content).toContain("Prefer table-driven tests.");
+    });
+  });
+
+  test("listMemoryFiles returns metadata", async () => {
+    await withTempDir(async (workspace) => {
+      const dir = path.join(workspace, ".coconut", "memory");
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        path.join(dir, "a.md"),
+        "---\ntype: correction\npriority: 9\n---\nbody",
+      );
+
+      const files = await listMemoryFiles({
+        workspace,
+        memoryDir: ".coconut/memory",
+      });
+      expect(files.length).toBe(1);
+      expect(files[0]?.relPath).toBe(".coconut/memory/a.md");
+      expect(files[0]?.type).toBe("correction");
+      expect(files[0]?.priority).toBe(9);
+      expect(files[0]?.sizeBytes).toBeGreaterThan(0);
+    });
+  });
+
+  test("deleteMemoryFile removes a file inside memoryDir", async () => {
+    await withTempDir(async (workspace) => {
+      const dir = path.join(workspace, ".coconut", "memory");
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, "a.md"), "body");
+
+      const deleted = await deleteMemoryFile({
+        workspace,
+        memoryDir: ".coconut/memory",
+        relPath: ".coconut/memory/a.md",
+      });
+      expect(deleted).toBe(".coconut/memory/a.md");
+
+      const files = await listMemoryFiles({
+        workspace,
+        memoryDir: ".coconut/memory",
+      });
+      expect(files.length).toBe(0);
+    });
+  });
+
+  test("rejects traversal on read/delete", async () => {
+    await withTempDir(async (workspace) => {
+      await expect(
+        readMemoryFile({
+          workspace,
+          memoryDir: ".coconut/memory",
+          relPath: "../outside.md",
+        }),
+      ).rejects.toThrow("outside the memory directory");
+      await expect(
+        deleteMemoryFile({
+          workspace,
+          memoryDir: ".coconut/memory",
+          relPath: "../outside.md",
+        }),
+      ).rejects.toThrow("outside the memory directory");
+    });
+  });
+});

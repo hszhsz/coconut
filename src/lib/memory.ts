@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 import { estimateTokens } from "./compaction.js";
 import type { ChatMessage } from "./agent.js";
 
@@ -222,4 +223,112 @@ export async function buildMemoryInjection(opts: {
     skipped,
     usedTokens: estimateTokens(content),
   };
+}
+
+export interface MemoryFileSummary {
+  relPath: string;
+  type: string;
+  priority: number;
+  sizeBytes: number;
+}
+
+function resolveInsideMemoryDir(
+  workspace: string,
+  memoryDir: string,
+  relPath: string,
+): { abs: string; rel: string } {
+  const { abs: dirAbs } = resolveMemoryDir(workspace, memoryDir);
+  const root = path.resolve(workspace);
+  const abs = path.resolve(root, relPath);
+  if (abs !== dirAbs && !abs.startsWith(dirAbs + path.sep)) {
+    throw new Error("path is outside the memory directory");
+  }
+  return { abs, rel: path.relative(root, abs).replace(/\\/g, "/") };
+}
+
+export async function createMemoryNote(opts: {
+  workspace: string;
+  memoryDir: string;
+  text: string;
+  type?: string;
+  priority?: number;
+  timestamp?: number;
+}): Promise<string> {
+  const { workspace, memoryDir, text } = opts;
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("memory text must not be empty");
+
+  const { abs: dirAbs, rel: dirRel } = resolveMemoryDir(workspace, memoryDir);
+  const notesAbs = path.join(dirAbs, "notes");
+  await fs.mkdir(notesAbs, { recursive: true });
+
+  const stamp = opts.timestamp ?? Date.now();
+  const fileName = `note-${stamp}-${randomBytes(3).toString("hex")}.md`;
+  const absPath = path.join(notesAbs, fileName);
+  const type = opts.type ?? "reference";
+  const priority = opts.priority ?? 0;
+  const content = `---\ntype: ${type}\npriority: ${priority}\n---\n${trimmed}\n`;
+  await fs.writeFile(absPath, content, "utf-8");
+
+  return path.posix.join(dirRel.replace(/\\/g, "/"), "notes", fileName);
+}
+
+export async function listMemoryFiles(opts: {
+  workspace: string;
+  memoryDir: string;
+}): Promise<MemoryFileSummary[]> {
+  const { workspace, memoryDir } = opts;
+  const { abs, rel } = resolveMemoryDir(workspace, memoryDir);
+  try {
+    const stat = await fs.stat(abs);
+    if (!stat.isDirectory()) return [];
+  } catch (e: any) {
+    if (e?.code === "ENOENT") return [];
+    throw e;
+  }
+
+  const files = await collectMemoryFiles(abs, rel);
+  const root = path.resolve(workspace);
+  const out: MemoryFileSummary[] = [];
+  for (const relPath of files) {
+    const absPath = path.resolve(root, relPath);
+    const [text, stat] = await Promise.all([
+      fs.readFile(absPath, "utf-8"),
+      fs.stat(absPath),
+    ]);
+    const { meta } = parseFrontmatter(text);
+    const type = meta.type || "reference";
+    const priority = Number.isFinite(Number(meta.priority))
+      ? Number(meta.priority)
+      : 0;
+    out.push({ relPath, type, priority, sizeBytes: stat.size });
+  }
+  return out;
+}
+
+export async function readMemoryFile(opts: {
+  workspace: string;
+  memoryDir: string;
+  relPath: string;
+}): Promise<string> {
+  const { abs } = resolveInsideMemoryDir(
+    opts.workspace,
+    opts.memoryDir,
+    opts.relPath,
+  );
+  return fs.readFile(abs, "utf-8");
+}
+
+export async function deleteMemoryFile(opts: {
+  workspace: string;
+  memoryDir: string;
+  relPath: string;
+}): Promise<string> {
+  const { abs, rel } = resolveInsideMemoryDir(
+    opts.workspace,
+    opts.memoryDir,
+    opts.relPath,
+  );
+  await fs.rm(abs);
+  return rel;
 }
