@@ -149,3 +149,77 @@ describe("history compaction boundaries", () => {
     expect(result.messages.at(-1)?.content).toBe("recent goal 2");
   });
 });
+
+import { pruneToolResults } from "./compaction.js";
+import { mkdir, writeFile as writeFileFs, stat as statFs } from "node:fs/promises";
+
+describe("pruneToolResults", () => {
+  test("prunes oldest files beyond max file count", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "coconut-retention-test-"));
+    try {
+      const outDir = path.join(dir, ".coconut", "tool-results");
+      await mkdir(outDir, { recursive: true });
+      for (let i = 0; i < 5; i++) {
+        const p = path.join(outDir, `bash-${i}.log`);
+        await writeFileFs(p, "x".repeat(100));
+        // Stagger mtimes so ordering is deterministic.
+        const when = new Date(Date.UTC(2026, 0, 1, 0, 0, i));
+        await (await import("node:fs/promises")).utimes(p, when, when);
+      }
+
+      const stats = await pruneToolResults({
+        workspace: dir,
+        outputDir: ".coconut/tool-results",
+        maxFiles: 2,
+        maxBytes: 1_000_000,
+      });
+
+      expect(stats.removedFiles).toBe(3);
+      expect(stats.remainingFiles).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("prunes oldest files beyond max byte budget", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "coconut-retention-test-"));
+    try {
+      const outDir = path.join(dir, ".coconut", "tool-results");
+      await mkdir(outDir, { recursive: true });
+      for (let i = 0; i < 4; i++) {
+        const p = path.join(outDir, `bash-${i}.log`);
+        await writeFileFs(p, "x".repeat(100));
+        const when = new Date(Date.UTC(2026, 0, 1, 0, 0, i));
+        await (await import("node:fs/promises")).utimes(p, when, when);
+      }
+
+      const stats = await pruneToolResults({
+        workspace: dir,
+        outputDir: ".coconut/tool-results",
+        maxFiles: 100,
+        maxBytes: 250,
+      });
+
+      expect(stats.remainingBytes).toBeLessThanOrEqual(250);
+      expect(stats.removedFiles).toBeGreaterThan(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("missing output directory is a no-op", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "coconut-retention-test-"));
+    try {
+      const stats = await pruneToolResults({
+        workspace: dir,
+        outputDir: ".coconut/tool-results",
+        maxFiles: 2,
+        maxBytes: 100,
+      });
+      expect(stats.removedFiles).toBe(0);
+      expect(stats.remainingFiles).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

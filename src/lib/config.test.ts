@@ -21,6 +21,8 @@ describe("loadConfig compression budget fields", () => {
       expect(cfg.toolOutputPreviewHeadChars).toBe(2_000);
       expect(cfg.toolOutputPreviewTailChars).toBe(1_000);
       expect(cfg.toolOutputDir).toBe(".coconut/tool-results");
+      expect(cfg.toolOutputRetentionMaxFiles).toBe(200);
+      expect(cfg.toolOutputRetentionMaxBytes).toBe(52_428_800);
       expect(cfg.tokenBudgetMax).toBe(200_000);
       expect(cfg.tokenBudgetWarnRatio).toBe(0.8);
       expect(cfg.tokenBudgetHardRatio).toBe(1.0);
@@ -41,6 +43,8 @@ describe("loadConfig compression budget fields", () => {
           toolOutputPreviewHeadChars: 20,
           toolOutputPreviewTailChars: 10,
           toolOutputDir: ".custom/results",
+          toolOutputRetentionMaxFiles: 7,
+          toolOutputRetentionMaxBytes: 1234,
           tokenBudgetMax: 5000,
           tokenBudgetWarnRatio: 0.5,
           tokenBudgetHardRatio: 0.75,
@@ -57,6 +61,8 @@ describe("loadConfig compression budget fields", () => {
       expect(cfg.toolOutputPreviewHeadChars).toBe(20);
       expect(cfg.toolOutputPreviewTailChars).toBe(10);
       expect(cfg.toolOutputDir).toBe(".custom/results");
+      expect(cfg.toolOutputRetentionMaxFiles).toBe(7);
+      expect(cfg.toolOutputRetentionMaxBytes).toBe(1234);
       expect(cfg.tokenBudgetMax).toBe(5000);
       expect(cfg.tokenBudgetWarnRatio).toBe(0.5);
       expect(cfg.tokenBudgetHardRatio).toBe(0.75);

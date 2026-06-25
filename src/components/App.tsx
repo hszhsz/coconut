@@ -31,6 +31,8 @@ interface Props {
   memoryInjectionGuaranteedCorrectionTokens: number;
   dynamicContextEnabled: boolean;
   dynamicContextIncludeDate: boolean;
+  toolOutputRetentionMaxFiles: number;
+  toolOutputRetentionMaxBytes: number;
   configDescription: string;
 }
 
@@ -61,6 +63,8 @@ export default function App({
   memoryInjectionGuaranteedCorrectionTokens,
   dynamicContextEnabled,
   dynamicContextIncludeDate,
+  toolOutputRetentionMaxFiles,
+  toolOutputRetentionMaxBytes,
   configDescription,
 }: Props) {
   const { exit } = useApp();
@@ -99,6 +103,8 @@ export default function App({
         memoryInjectionGuaranteedCorrectionTokens,
         dynamicContextEnabled,
         dynamicContextIncludeDate,
+        toolOutputRetentionMaxFiles,
+        toolOutputRetentionMaxBytes,
       }),
   );
 

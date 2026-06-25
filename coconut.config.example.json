@@ -17,6 +17,8 @@
   "toolOutputPreviewHeadChars": 2000,
   "toolOutputPreviewTailChars": 1000,
   "toolOutputDir": ".coconut/tool-results",
+  "toolOutputRetentionMaxFiles": 200,
+  "toolOutputRetentionMaxBytes": 52428800,
 
   "tokenBudgetMax": 200000,
   "tokenBudgetWarnRatio": 0.8,

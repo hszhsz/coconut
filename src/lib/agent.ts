@@ -6,6 +6,7 @@ import {
   clearOldToolResults,
   compactHistory,
   maybeExternalizeToolResult,
+  pruneToolResults,
   SUMMARIZATION_SYSTEM_PROMPT,
   type TokenStats,
   type ToolOutputBudgetConfig,
@@ -76,6 +77,8 @@ export interface AgentConfig {
   toolOutputPreviewHeadChars?: number;
   toolOutputPreviewTailChars?: number;
   toolOutputDir?: string;
+  toolOutputRetentionMaxFiles?: number;
+  toolOutputRetentionMaxBytes?: number;
   tokenBudgetMax?: number;
   tokenBudgetWarnRatio?: number;
   tokenBudgetHardRatio?: number;
@@ -118,6 +121,8 @@ export class Agent {
   private compressionThreshold: number;
   private keepRecentTurns: number;
   private toolOutputBudget: ToolOutputBudgetConfig;
+  private toolOutputRetentionMaxFiles: number;
+  private toolOutputRetentionMaxBytes: number;
   private tokenBudgetMax: number;
   private tokenBudgetWarnRatio: number;
   private tokenBudgetHardRatio: number;
@@ -154,6 +159,9 @@ export class Agent {
       previewTailChars: config.toolOutputPreviewTailChars ?? 1_000,
       outputDir: config.toolOutputDir ?? ".coconut/tool-results",
     };
+    this.toolOutputRetentionMaxFiles = config.toolOutputRetentionMaxFiles ?? 200;
+    this.toolOutputRetentionMaxBytes =
+      config.toolOutputRetentionMaxBytes ?? 52_428_800;
     this.tokenBudgetMax = config.tokenBudgetMax ?? 200_000;
     this.tokenBudgetWarnRatio = config.tokenBudgetWarnRatio ?? 0.8;
     this.tokenBudgetHardRatio = config.tokenBudgetHardRatio ?? 1.0;
@@ -311,6 +319,21 @@ export class Agent {
         onInfo?.(
           `Saved full ${name} output to ${prepared.filePath} (${prepared.originalChars.toLocaleString()} chars, ~${prepared.estimatedTokens.toLocaleString()} tokens)`,
         );
+        try {
+          const pruned = await pruneToolResults({
+            workspace: this.sandbox.workspace,
+            outputDir: this.toolOutputBudget.outputDir,
+            maxFiles: this.toolOutputRetentionMaxFiles,
+            maxBytes: this.toolOutputRetentionMaxBytes,
+          });
+          if (pruned.removedFiles > 0) {
+            onInfo?.(
+              `Pruned ${pruned.removedFiles} old tool-result file${pruned.removedFiles === 1 ? "" : "s"} (retention)`,
+            );
+          }
+        } catch {
+          /* retention is best-effort */
+        }
       }
       return prepared.content;
     } catch (e: any) {

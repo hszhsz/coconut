@@ -93,6 +93,8 @@ async function main() {
       memoryInjectionGuaranteedCorrectionTokens={cfg!.memoryInjectionGuaranteedCorrectionTokens}
       dynamicContextEnabled={cfg!.dynamicContextEnabled}
       dynamicContextIncludeDate={cfg!.dynamicContextIncludeDate}
+      toolOutputRetentionMaxFiles={cfg!.toolOutputRetentionMaxFiles}
+      toolOutputRetentionMaxBytes={cfg!.toolOutputRetentionMaxBytes}
       configDescription={describeConfig(cfg!)}
     />,
   );

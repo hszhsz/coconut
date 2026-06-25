@@ -333,3 +333,76 @@ Produce a dense, structured summary covering:
 Use markdown bullet points. Be specific — preserve exact names, paths, and identifiers. Drop pleasantries, meta-commentary, and verbose tool outputs that aren't load-bearing. Keep under 600 words.
 
 Do not include any text outside the summary.`;
+
+export interface ToolResultRetentionStats {
+  removedFiles: number;
+  remainingFiles: number;
+  remainingBytes: number;
+}
+
+/**
+ * Bound the externalized tool-result directory by file count and total bytes.
+ * Oldest files (by mtime) are removed first until both limits are satisfied.
+ * Missing directory is a no-op. Only operates inside the workspace.
+ */
+export async function pruneToolResults(opts: {
+  workspace: string;
+  outputDir: string;
+  maxFiles: number;
+  maxBytes: number;
+}): Promise<ToolResultRetentionStats> {
+  const { workspace, outputDir, maxFiles, maxBytes } = opts;
+  const root = path.resolve(workspace);
+  const relDir = outputDir.replace(/^\/+/, "");
+  const absDir = path.resolve(root, relDir);
+  if (absDir !== root && !absDir.startsWith(root + path.sep)) {
+    throw new Error(`toolOutputDir ${outputDir} resolves outside the workspace`);
+  }
+
+  let dirents;
+  try {
+    dirents = await fs.readdir(absDir, { withFileTypes: true });
+  } catch (e: any) {
+    if (e?.code === "ENOENT") {
+      return { removedFiles: 0, remainingFiles: 0, remainingBytes: 0 };
+    }
+    throw e;
+  }
+
+  const files: { abs: string; size: number; mtimeMs: number }[] = [];
+  for (const d of dirents) {
+    if (!d.isFile()) continue;
+    const abs = path.join(absDir, d.name);
+    try {
+      const st = await fs.stat(abs);
+      files.push({ abs, size: st.size, mtimeMs: st.mtimeMs });
+    } catch {
+      /* skip unreadable file */
+    }
+  }
+
+  // Oldest first.
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+  let totalBytes = files.reduce((n, f) => n + f.size, 0);
+  let count = files.length;
+  let removedFiles = 0;
+
+  for (const f of files) {
+    if (count <= maxFiles && totalBytes <= maxBytes) break;
+    try {
+      await fs.rm(f.abs);
+      removedFiles++;
+      count--;
+      totalBytes -= f.size;
+    } catch {
+      /* skip undeletable file */
+    }
+  }
+
+  return {
+    removedFiles,
+    remainingFiles: count,
+    remainingBytes: totalBytes,
+  };
+}

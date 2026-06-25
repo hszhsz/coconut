@@ -28,6 +28,8 @@ export const ConfigSchema = z
     toolOutputPreviewHeadChars: z.number().int().min(0).optional(),
     toolOutputPreviewTailChars: z.number().int().min(0).optional(),
     toolOutputDir: z.string().min(1).optional(),
+    toolOutputRetentionMaxFiles: z.number().int().min(0).optional(),
+    toolOutputRetentionMaxBytes: z.number().int().min(0).optional(),
     tokenBudgetMax: z.number().int().positive().optional(),
     tokenBudgetWarnRatio: z.number().min(0.1).max(0.99).optional(),
     tokenBudgetHardRatio: z.number().min(0.1).max(1).optional(),
@@ -57,6 +59,8 @@ export interface ResolvedConfig {
   toolOutputPreviewHeadChars: number;
   toolOutputPreviewTailChars: number;
   toolOutputDir: string;
+  toolOutputRetentionMaxFiles: number;
+  toolOutputRetentionMaxBytes: number;
   tokenBudgetMax: number;
   tokenBudgetWarnRatio: number;
   tokenBudgetHardRatio: number;
@@ -91,6 +95,8 @@ const DEFAULTS: Omit<ResolvedConfig, "source"> = {
   toolOutputPreviewHeadChars: 2_000,
   toolOutputPreviewTailChars: 1_000,
   toolOutputDir: ".coconut/tool-results",
+  toolOutputRetentionMaxFiles: 200,
+  toolOutputRetentionMaxBytes: 52_428_800,
   tokenBudgetMax: 200_000,
   tokenBudgetWarnRatio: 0.8,
   tokenBudgetHardRatio: 1.0,
@@ -218,6 +224,22 @@ function envOverrides(): ConfigFile {
   }
   if (process.env.COCONUT_TOOL_OUTPUT_DIR) {
     out.toolOutputDir = process.env.COCONUT_TOOL_OUTPUT_DIR;
+  }
+  if (process.env.COCONUT_TOOL_OUTPUT_RETENTION_MAX_FILES) {
+    const n = Number(process.env.COCONUT_TOOL_OUTPUT_RETENTION_MAX_FILES);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_TOOL_OUTPUT_RETENTION_MAX_FILES must be a non-negative integer",
+      );
+    out.toolOutputRetentionMaxFiles = n;
+  }
+  if (process.env.COCONUT_TOOL_OUTPUT_RETENTION_MAX_BYTES) {
+    const n = Number(process.env.COCONUT_TOOL_OUTPUT_RETENTION_MAX_BYTES);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_TOOL_OUTPUT_RETENTION_MAX_BYTES must be a non-negative integer",
+      );
+    out.toolOutputRetentionMaxBytes = n;
   }
   if (process.env.COCONUT_TOKEN_BUDGET_MAX) {
     const n = Number(process.env.COCONUT_TOKEN_BUDGET_MAX);
@@ -354,6 +376,10 @@ export async function loadConfig(opts?: {
     toolOutputPreviewTailChars:
       merged.toolOutputPreviewTailChars ?? DEFAULTS.toolOutputPreviewTailChars,
     toolOutputDir: merged.toolOutputDir ?? DEFAULTS.toolOutputDir,
+    toolOutputRetentionMaxFiles:
+      merged.toolOutputRetentionMaxFiles ?? DEFAULTS.toolOutputRetentionMaxFiles,
+    toolOutputRetentionMaxBytes:
+      merged.toolOutputRetentionMaxBytes ?? DEFAULTS.toolOutputRetentionMaxBytes,
     tokenBudgetMax: merged.tokenBudgetMax ?? DEFAULTS.tokenBudgetMax,
     tokenBudgetWarnRatio:
       merged.tokenBudgetWarnRatio ?? DEFAULTS.tokenBudgetWarnRatio,
@@ -404,6 +430,8 @@ export function describeConfig(cfg: ResolvedConfig): string {
     `toolOutputPreviewHeadChars:   ${cfg.toolOutputPreviewHeadChars}`,
     `toolOutputPreviewTailChars:   ${cfg.toolOutputPreviewTailChars}`,
     `toolOutputDir:                ${cfg.toolOutputDir}`,
+    `toolOutputRetentionMaxFiles:  ${cfg.toolOutputRetentionMaxFiles}`,
+    `toolOutputRetentionMaxBytes:  ${cfg.toolOutputRetentionMaxBytes}`,
     `tokenBudgetMax:               ${cfg.tokenBudgetMax}`,
     `tokenBudgetWarnRatio:         ${cfg.tokenBudgetWarnRatio}`,
     `tokenBudgetHardRatio:         ${cfg.tokenBudgetHardRatio}`,
@@ -450,6 +478,8 @@ export const EXAMPLE_CONFIG: ConfigFile = {
   toolOutputPreviewHeadChars: 2_000,
   toolOutputPreviewTailChars: 1_000,
   toolOutputDir: ".coconut/tool-results",
+  toolOutputRetentionMaxFiles: 200,
+  toolOutputRetentionMaxBytes: 52_428_800,
   tokenBudgetMax: 200_000,
   tokenBudgetWarnRatio: 0.8,
   tokenBudgetHardRatio: 1.0,
