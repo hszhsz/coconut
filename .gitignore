@@ -36,3 +36,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Coconut user config (may contain API keys)
 .coconut.json
 coconut.config.json
+
+# Coconut runtime artifacts
+.coconut/

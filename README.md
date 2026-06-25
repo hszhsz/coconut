@@ -11,7 +11,7 @@ Built with TypeScript, Bun, [Ink](https://github.com/vadimdemedes/ink), and any 
 - 🔄 Multi-turn agentic loop — the model can call tools repeatedly until done
 - 🧪 Sandboxing — run all tool operations in a Docker container or workspace-scoped local mode
 - 📝 Config file — persist your model, sandbox, temperature, and persona in `~/.config/coconut/config.json` or `.coconut.json`
-- 🗜️ Context compression — automatic two-stage pipeline (tool-result clearing + LLM summarization) when conversations approach the context window, with a live token meter in the header
+- 🗜️ Context compression — layered pipeline with tool-output externalization, old-result clearing, LLM summarization, and run-level token budget warnings when conversations approach the context window
 - 🔌 OpenAI-compatible — works with DeepSeek, Qwen, Moonshot, OpenAI, vLLM, Ollama, etc.
 - ⚡ Bun-powered, single-file build
 
@@ -138,24 +138,39 @@ export COCONUT_MODEL=qwen2.5-coder
 
 ## Context compression
 
-Coding agents burn through context fast — tool outputs, file contents, long stack traces. Coconut runs a layered compression pipeline at the top of every turn, the same pattern Claude Code and Cline use:
+Coding agents burn through context fast — tool outputs, file contents, long stack traces. Coconut uses a DeerFlow-inspired layered compression strategy while staying provider-neutral and OpenAI-compatible.
 
-1. **Token estimation** — every message in history is measured (mixed ASCII/CJK heuristic). The TUI header shows `tokens: 12.3K / 64K (19%)`, color-coded green → yellow → red as you approach the threshold.
-2. **Cheap stage** (no LLM call) — when usage crosses `compressionThreshold`, bulky `tool_result` payloads from older turns are replaced with `[older tool result cleared — was N chars]` placeholders. `tool_call_id` linkage stays intact so the conversation remains structurally valid.
-3. **Expensive stage** (one LLM call) — if usage is *still* over threshold, history older than the last `keepRecentTurns` user turns is summarized into a single anchor message (preserving goals, files referenced, decisions made, current state, user preferences). The summary replaces the old turns; recent turns stay verbatim.
-4. **Manual override** — `/compact` runs the full pipeline immediately regardless of threshold.
+1. **Token estimation** — every message in history is measured with a lightweight mixed ASCII/CJK heuristic. The TUI header shows `tokens: 12.3K / 64K (19%)`, color-coded green → yellow → red as you approach the threshold.
+2. **Tool output budget** — large tool results are saved under `.coconut/tool-results/`. The conversation keeps only a head/tail preview with the saved file path. Use `read_file` on that path when the full output is needed.
+3. **Cheap history cleanup** — older bulky `tool` payloads are replaced with placeholders while preserving `tool_call_id` linkage so the message sequence remains valid.
+4. **LLM summarization** — if usage is still over threshold, history older than the last `keepRecentTurns` user turns is summarized into a single anchor message. The summary preserves goals, files, decisions, current state, pending work, user preferences, and important externalized output paths.
+5. **Run token budget** — each user turn has a run-level estimated token budget. Coconut injects a warning when the turn approaches the budget and stops additional tool work at the hard limit so it can converge instead of looping forever.
+6. **Manual override** — `/compact` runs the full compression pipeline immediately regardless of threshold.
 
-Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the last 4 user turns verbatim. Tune them in your config:
+Defaults: 64K token window, compaction triggers at 70% (≈45K tokens), keep the last 4 user turns verbatim, externalize tool outputs above 12K characters, and warn at 80% of the run budget. Tune them in your config:
 
 ```jsonc
 {
-  "contextWindow": 64000,            // adjust to your model's real window
-  "compressionThreshold": 0.7,       // 0.1–0.95
-  "keepRecentTurns": 4               // 1–50
+  "contextWindow": 64000,
+  "compressionThreshold": 0.7,
+  "keepRecentTurns": 4,
+
+  "toolOutputExternalizeMinChars": 12000,
+  "toolOutputPreviewHeadChars": 2000,
+  "toolOutputPreviewTailChars": 1000,
+  "toolOutputDir": ".coconut/tool-results",
+
+  "tokenBudgetMax": 200000,
+  "tokenBudgetWarnRatio": 0.8,
+  "tokenBudgetHardRatio": 1.0,
+
+  "memoryInjectionMaxTokens": 2000
 }
 ```
 
-> The token count is a heuristic estimator (~4 chars/token for non-CJK, ~1 char/token for CJK), within ~15% of actual provider counts. It drives compression decisions but isn't billed-token-accurate.
+> Token counts are heuristic, not provider-billed counts. They are intentionally provider-independent so Coconut can work with any OpenAI-compatible endpoint.
+>
+> `.coconut/` contains runtime artifacts and is ignored by git. Tool-result files are not deleted automatically in this phase.
 
 ## Sandbox
 
