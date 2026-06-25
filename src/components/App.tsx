@@ -19,6 +19,14 @@ interface Props {
   contextWindow: number;
   compressionThreshold: number;
   keepRecentTurns: number;
+  toolOutputExternalizeMinChars: number;
+  toolOutputPreviewHeadChars: number;
+  toolOutputPreviewTailChars: number;
+  toolOutputDir: string;
+  tokenBudgetMax: number;
+  tokenBudgetWarnRatio: number;
+  tokenBudgetHardRatio: number;
+  memoryInjectionMaxTokens: number;
   configDescription: string;
 }
 
@@ -37,6 +45,14 @@ export default function App({
   contextWindow,
   compressionThreshold,
   keepRecentTurns,
+  toolOutputExternalizeMinChars,
+  toolOutputPreviewHeadChars,
+  toolOutputPreviewTailChars,
+  toolOutputDir,
+  tokenBudgetMax,
+  tokenBudgetWarnRatio,
+  tokenBudgetHardRatio,
+  memoryInjectionMaxTokens,
   configDescription,
 }: Props) {
   const { exit } = useApp();
@@ -63,6 +79,14 @@ export default function App({
         contextWindow,
         compressionThreshold,
         keepRecentTurns,
+        toolOutputExternalizeMinChars,
+        toolOutputPreviewHeadChars,
+        toolOutputPreviewTailChars,
+        toolOutputDir,
+        tokenBudgetMax,
+        tokenBudgetWarnRatio,
+        tokenBudgetHardRatio,
+        memoryInjectionMaxTokens,
       }),
   );
 
@@ -132,7 +156,7 @@ export default function App({
         const pct = (s.ratio * 100).toFixed(1);
         append({
           role: "info",
-          content: `Tokens: ${s.used.toLocaleString()} / ${s.window.toLocaleString()} (${pct}%)\nAuto-compact triggers at ${(compressionThreshold * 100).toFixed(0)}%`,
+          content: `Tokens: ${s.used.toLocaleString()} / ${s.window.toLocaleString()} (${pct}%)\nAuto-compact triggers at ${(compressionThreshold * 100).toFixed(0)}%\nRun budget: ${tokenBudgetMax.toLocaleString()} tokens (warn ${(tokenBudgetWarnRatio * 100).toFixed(0)}%, hard ${(tokenBudgetHardRatio * 100).toFixed(0)}%)`,
         });
         setInput("");
         return;
@@ -206,7 +230,18 @@ export default function App({
         },
       });
     },
-    [agent, busy, append, exit, sandbox, configDescription, compressionThreshold],
+    [
+      agent,
+      busy,
+      append,
+      exit,
+      sandbox,
+      configDescription,
+      compressionThreshold,
+      tokenBudgetMax,
+      tokenBudgetWarnRatio,
+      tokenBudgetHardRatio,
+    ],
   );
 
   // Color the token meter by usage band.

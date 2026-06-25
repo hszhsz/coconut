@@ -24,6 +24,14 @@ export const ConfigSchema = z
     contextWindow: z.number().int().positive().optional(),
     compressionThreshold: z.number().min(0.1).max(0.95).optional(),
     keepRecentTurns: z.number().int().min(1).max(50).optional(),
+    toolOutputExternalizeMinChars: z.number().int().positive().optional(),
+    toolOutputPreviewHeadChars: z.number().int().min(0).optional(),
+    toolOutputPreviewTailChars: z.number().int().min(0).optional(),
+    toolOutputDir: z.string().min(1).optional(),
+    tokenBudgetMax: z.number().int().positive().optional(),
+    tokenBudgetWarnRatio: z.number().min(0.1).max(0.99).optional(),
+    tokenBudgetHardRatio: z.number().min(0.1).max(1).optional(),
+    memoryInjectionMaxTokens: z.number().int().min(0).optional(),
     sandbox: SandboxSchema.optional(),
   })
   .strict();
@@ -41,6 +49,14 @@ export interface ResolvedConfig {
   contextWindow: number;
   compressionThreshold: number;
   keepRecentTurns: number;
+  toolOutputExternalizeMinChars: number;
+  toolOutputPreviewHeadChars: number;
+  toolOutputPreviewTailChars: number;
+  toolOutputDir: string;
+  tokenBudgetMax: number;
+  tokenBudgetWarnRatio: number;
+  tokenBudgetHardRatio: number;
+  memoryInjectionMaxTokens: number;
   sandbox: {
     kind: "local" | "docker";
     workspace: string;
@@ -63,6 +79,14 @@ const DEFAULTS: Omit<ResolvedConfig, "source"> = {
   contextWindow: 64_000,
   compressionThreshold: 0.7,
   keepRecentTurns: 4,
+  toolOutputExternalizeMinChars: 12_000,
+  toolOutputPreviewHeadChars: 2_000,
+  toolOutputPreviewTailChars: 1_000,
+  toolOutputDir: ".coconut/tool-results",
+  tokenBudgetMax: 200_000,
+  tokenBudgetWarnRatio: 0.8,
+  tokenBudgetHardRatio: 1.0,
+  memoryInjectionMaxTokens: 2_000,
   sandbox: {
     kind: "local",
     workspace: process.cwd(),
@@ -156,6 +180,63 @@ function envOverrides(): ConfigFile {
       throw new Error("COCONUT_KEEP_RECENT_TURNS must be an integer 1..50");
     out.keepRecentTurns = n;
   }
+  if (process.env.COCONUT_TOOL_OUTPUT_EXTERNALIZE_MIN_CHARS) {
+    const n = Number(process.env.COCONUT_TOOL_OUTPUT_EXTERNALIZE_MIN_CHARS);
+    if (!Number.isInteger(n) || n <= 0)
+      throw new Error(
+        "COCONUT_TOOL_OUTPUT_EXTERNALIZE_MIN_CHARS must be a positive integer",
+      );
+    out.toolOutputExternalizeMinChars = n;
+  }
+  if (process.env.COCONUT_TOOL_OUTPUT_PREVIEW_HEAD_CHARS) {
+    const n = Number(process.env.COCONUT_TOOL_OUTPUT_PREVIEW_HEAD_CHARS);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_TOOL_OUTPUT_PREVIEW_HEAD_CHARS must be a non-negative integer",
+      );
+    out.toolOutputPreviewHeadChars = n;
+  }
+  if (process.env.COCONUT_TOOL_OUTPUT_PREVIEW_TAIL_CHARS) {
+    const n = Number(process.env.COCONUT_TOOL_OUTPUT_PREVIEW_TAIL_CHARS);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_TOOL_OUTPUT_PREVIEW_TAIL_CHARS must be a non-negative integer",
+      );
+    out.toolOutputPreviewTailChars = n;
+  }
+  if (process.env.COCONUT_TOOL_OUTPUT_DIR) {
+    out.toolOutputDir = process.env.COCONUT_TOOL_OUTPUT_DIR;
+  }
+  if (process.env.COCONUT_TOKEN_BUDGET_MAX) {
+    const n = Number(process.env.COCONUT_TOKEN_BUDGET_MAX);
+    if (!Number.isInteger(n) || n <= 0)
+      throw new Error("COCONUT_TOKEN_BUDGET_MAX must be a positive integer");
+    out.tokenBudgetMax = n;
+  }
+  if (process.env.COCONUT_TOKEN_BUDGET_WARN_RATIO) {
+    const n = Number(process.env.COCONUT_TOKEN_BUDGET_WARN_RATIO);
+    if (!Number.isFinite(n) || n < 0.1 || n > 0.99)
+      throw new Error(
+        "COCONUT_TOKEN_BUDGET_WARN_RATIO must be between 0.1 and 0.99",
+      );
+    out.tokenBudgetWarnRatio = n;
+  }
+  if (process.env.COCONUT_TOKEN_BUDGET_HARD_RATIO) {
+    const n = Number(process.env.COCONUT_TOKEN_BUDGET_HARD_RATIO);
+    if (!Number.isFinite(n) || n < 0.1 || n > 1)
+      throw new Error(
+        "COCONUT_TOKEN_BUDGET_HARD_RATIO must be between 0.1 and 1",
+      );
+    out.tokenBudgetHardRatio = n;
+  }
+  if (process.env.COCONUT_MEMORY_INJECTION_MAX_TOKENS) {
+    const n = Number(process.env.COCONUT_MEMORY_INJECTION_MAX_TOKENS);
+    if (!Number.isInteger(n) || n < 0)
+      throw new Error(
+        "COCONUT_MEMORY_INJECTION_MAX_TOKENS must be a non-negative integer",
+      );
+    out.memoryInjectionMaxTokens = n;
+  }
 
   const sb: NonNullable<ConfigFile["sandbox"]> = {};
   let sbTouched = false;
@@ -234,6 +315,20 @@ export async function loadConfig(opts?: {
     compressionThreshold:
       merged.compressionThreshold ?? DEFAULTS.compressionThreshold,
     keepRecentTurns: merged.keepRecentTurns ?? DEFAULTS.keepRecentTurns,
+    toolOutputExternalizeMinChars:
+      merged.toolOutputExternalizeMinChars ?? DEFAULTS.toolOutputExternalizeMinChars,
+    toolOutputPreviewHeadChars:
+      merged.toolOutputPreviewHeadChars ?? DEFAULTS.toolOutputPreviewHeadChars,
+    toolOutputPreviewTailChars:
+      merged.toolOutputPreviewTailChars ?? DEFAULTS.toolOutputPreviewTailChars,
+    toolOutputDir: merged.toolOutputDir ?? DEFAULTS.toolOutputDir,
+    tokenBudgetMax: merged.tokenBudgetMax ?? DEFAULTS.tokenBudgetMax,
+    tokenBudgetWarnRatio:
+      merged.tokenBudgetWarnRatio ?? DEFAULTS.tokenBudgetWarnRatio,
+    tokenBudgetHardRatio:
+      merged.tokenBudgetHardRatio ?? DEFAULTS.tokenBudgetHardRatio,
+    memoryInjectionMaxTokens:
+      merged.memoryInjectionMaxTokens ?? DEFAULTS.memoryInjectionMaxTokens,
     sandbox: {
       kind: sb.kind ?? DEFAULTS.sandbox.kind,
       workspace: path.resolve(sb.workspace ?? cwd),
@@ -242,6 +337,10 @@ export async function loadConfig(opts?: {
     },
     source: { paths: loaded },
   };
+
+  if (resolved.tokenBudgetWarnRatio >= resolved.tokenBudgetHardRatio) {
+    throw new Error("tokenBudgetWarnRatio must be less than tokenBudgetHardRatio");
+  }
 
   return resolved;
 }
@@ -261,6 +360,14 @@ export function describeConfig(cfg: ResolvedConfig): string {
     `contextWindow:        ${cfg.contextWindow}`,
     `compressionThreshold: ${cfg.compressionThreshold}`,
     `keepRecentTurns:      ${cfg.keepRecentTurns}`,
+    `toolOutputExternalizeMinChars: ${cfg.toolOutputExternalizeMinChars}`,
+    `toolOutputPreviewHeadChars:   ${cfg.toolOutputPreviewHeadChars}`,
+    `toolOutputPreviewTailChars:   ${cfg.toolOutputPreviewTailChars}`,
+    `toolOutputDir:                ${cfg.toolOutputDir}`,
+    `tokenBudgetMax:               ${cfg.tokenBudgetMax}`,
+    `tokenBudgetWarnRatio:         ${cfg.tokenBudgetWarnRatio}`,
+    `tokenBudgetHardRatio:         ${cfg.tokenBudgetHardRatio}`,
+    `memoryInjectionMaxTokens:     ${cfg.memoryInjectionMaxTokens}`,
     `sandbox.kind:  ${cfg.sandbox.kind}`,
     `sandbox.workspace: ${cfg.sandbox.workspace}`,
   ];
@@ -295,6 +402,14 @@ export const EXAMPLE_CONFIG: ConfigFile = {
   contextWindow: 64_000,
   compressionThreshold: 0.7,
   keepRecentTurns: 4,
+  toolOutputExternalizeMinChars: 12_000,
+  toolOutputPreviewHeadChars: 2_000,
+  toolOutputPreviewTailChars: 1_000,
+  toolOutputDir: ".coconut/tool-results",
+  tokenBudgetMax: 200_000,
+  tokenBudgetWarnRatio: 0.8,
+  tokenBudgetHardRatio: 1.0,
+  memoryInjectionMaxTokens: 2_000,
   sandbox: {
     kind: "local",
     workspace: null,

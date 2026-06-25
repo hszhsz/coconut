@@ -13,6 +13,17 @@
   "compressionThreshold": 0.7,
   "keepRecentTurns": 4,
 
+  "toolOutputExternalizeMinChars": 12000,
+  "toolOutputPreviewHeadChars": 2000,
+  "toolOutputPreviewTailChars": 1000,
+  "toolOutputDir": ".coconut/tool-results",
+
+  "tokenBudgetMax": 200000,
+  "tokenBudgetWarnRatio": 0.8,
+  "tokenBudgetHardRatio": 1.0,
+
+  "memoryInjectionMaxTokens": 2000,
+
   "sandbox": {
     "kind": "local",
     "workspace": null,

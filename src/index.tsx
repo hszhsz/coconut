@@ -81,6 +81,14 @@ async function main() {
       contextWindow={cfg!.contextWindow}
       compressionThreshold={cfg!.compressionThreshold}
       keepRecentTurns={cfg!.keepRecentTurns}
+      toolOutputExternalizeMinChars={cfg!.toolOutputExternalizeMinChars}
+      toolOutputPreviewHeadChars={cfg!.toolOutputPreviewHeadChars}
+      toolOutputPreviewTailChars={cfg!.toolOutputPreviewTailChars}
+      toolOutputDir={cfg!.toolOutputDir}
+      tokenBudgetMax={cfg!.tokenBudgetMax}
+      tokenBudgetWarnRatio={cfg!.tokenBudgetWarnRatio}
+      tokenBudgetHardRatio={cfg!.tokenBudgetHardRatio}
+      memoryInjectionMaxTokens={cfg!.memoryInjectionMaxTokens}
       configDescription={describeConfig(cfg!)}
     />,
   );
